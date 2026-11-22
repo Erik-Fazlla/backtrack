@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:backtrack/core/geo.dart';
+import 'package:backtrack/core/gps_gate.dart';
 import 'package:backtrack/core/kalman.dart';
 import 'package:backtrack/main.dart';
 import 'package:backtrack/services/recorder.dart';
@@ -19,7 +20,8 @@ void main() {
         Recorder(
             store: TrackStore(dir),
             positions: () => gps.stream,
-            smoother: PositionSmoother(processNoiseMps: 1e6))))!;
+            smoother: PositionSmoother(processNoiseMps: 1e6),
+            warmup: GpsWarmup(requiredFixes: 1, maxAccuracyM: 25))))!;
 
     await tester.pumpWidget(BacktrackApp(recorder: rec, showTiles: false));
     expect(find.text('Record'), findsOneWidget);
@@ -27,10 +29,13 @@ void main() {
 
     await tester.runAsync(() async {
       await tester.tap(find.byKey(const Key('record')));
-      await Future<void>.delayed(const Duration(milliseconds: 50));
+      // start() does real file IO; wait for it instead of a fixed delay.
+      for (var i = 0; i < 100 && rec.state != RecState.waitingForFix; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
     });
     await tester.pump();
-    expect(find.textContaining('Waiting for GPS'), findsOneWidget);
+    expect(find.textContaining('Getting an accurate position'), findsOneWidget);
     expect(find.byKey(const Key('stop')), findsOneWidget);
 
     await tester.runAsync(() async {

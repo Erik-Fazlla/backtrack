@@ -10,12 +10,17 @@ class TrackPoint {
     required this.accuracyM,
     required this.time,
     this.altitudeM,
+    this.speedMps,
   });
 
   final double lat;
   final double lon;
   final double accuracyM;
   final double? altitudeM;
+
+  /// Doppler speed from the GPS chip. Much more reliable than position
+  /// changes for telling "standing still" from "walking".
+  final double? speedMps;
   final DateTime time;
 
   Map<String, Object?> toJson() => {
@@ -23,6 +28,7 @@ class TrackPoint {
         'lon': lon,
         'acc': accuracyM,
         'alt': altitudeM,
+        if (speedMps != null) 'spd': speedMps,
         't': time.toUtc().millisecondsSinceEpoch,
       };
 
@@ -31,6 +37,7 @@ class TrackPoint {
         lon: (j['lon'] as num).toDouble(),
         accuracyM: (j['acc'] as num).toDouble(),
         altitudeM: (j['alt'] as num?)?.toDouble(),
+        speedMps: (j['spd'] as num?)?.toDouble(),
         time: DateTime.fromMillisecondsSinceEpoch(j['t'] as int, isUtc: true),
       );
 }

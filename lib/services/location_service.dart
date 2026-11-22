@@ -51,6 +51,12 @@ class LocationService {
   Stream<TrackPoint> positions({int distanceFilterM = 0}) {
     final LocationSettings settings = Platform.isAndroid
         ? AndroidSettings(
+            // Pure satellite GPS (LocationManager GPS_PROVIDER), not the
+            // fused provider. Fused mixes in Wi-Fi/cell positions, which in
+            // a city can be 20-50 m off while claiming good accuracy, and
+            // don't exist in a forest anyway. This is what the app will
+            // really have offline, so test with it too.
+            forceLocationManager: true,
             accuracy: LocationAccuracy.best,
             distanceFilter: distanceFilterM,
             intervalDuration: const Duration(seconds: 1),
@@ -74,6 +80,7 @@ class LocationService {
         lon: pos.longitude,
         accuracyM: pos.accuracy,
         altitudeM: pos.altitude == 0 ? null : pos.altitude,
+        speedMps: pos.speed,
         time: pos.timestamp.toUtc(),
       ),
     );

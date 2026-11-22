@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../core/geo.dart';
+import '../core/gps_gate.dart';
 import '../core/kalman.dart';
 import '../core/point_filter.dart';
 import 'track_store.dart';
@@ -19,9 +20,21 @@ class Recorder extends ChangeNotifier {
     PointFilter? filter,
     this.minSpacingM = 5,
     PositionSmoother? smoother,
+    GpsWarmup? warmup,
   })  : _now = now ?? DateTime.now,
         _filter = filter ?? PointFilter(),
-        _smoother = smoother ?? PositionSmoother();
+        _smoother = smoother ?? PositionSmoother(),
+        _warmup = warmup ?? GpsWarmup();
+
+  final GpsWarmup _warmup;
+
+  /// How many settled fixes we have while waiting for GPS (UI hint).
+  int get warmupProgress => _warmup.progress;
+  int get warmupRequired => _warmup.requiredFixes;
+
+  bool _moving = false;
+  /// False while GPS says you are standing still (trail is paused).
+  bool get moving => _moving;
 
   /// Save a smoothed point only after moving this far from the last one.
   final double minSpacingM;
@@ -58,6 +71,7 @@ class Recorder extends ChangeNotifier {
     _distanceM = 0;
     _filter.reset();
     _smoother.reset();
+    _warmup.reset();
     _startedAt = _now();
     await store.startSession(_startedAt!);
     _state = RecState.waitingForFix;
@@ -87,6 +101,8 @@ class Recorder extends ChangeNotifier {
       return false;
     }
     store.resume(s.file);
+    // Already had a settled fix before the restart: no warm-up needed.
+    _warmup.markReady();
     _state = RecState.recording;
     _listen();
     notifyListeners();
@@ -114,13 +130,31 @@ class Recorder extends ChangeNotifier {
       return;
     }
     _latest = p;
+    _writes = _writes.then((_) => store.appendRaw(p)); // diagnosis log
+
+    // 0. wait until the GPS has settled (no lines drawn while it converges)
+    if (!_warmup.ready) {
+      if (_warmup.feed(p)) {
+        _filter.reset();
+        _smoother.reset();
+      } else {
+        notifyListeners();
+        return;
+      }
+    }
     // 1. drop bad fixes (poor accuracy, impossible jumps) on the raw data
     if (_filter.accept(p)) {
-      // 2. smooth jitter
+      _moving = isMoving(p);
+      final last = _points.isEmpty ? null : _points.last;
+      // 2. standing still: GPS drifts but Doppler speed is ~0 -> freeze
+      if (last != null && !_moving) {
+        notifyListeners();
+        return;
+      }
+      // 3. smooth jitter
       final s = _smoother.update(p);
       _latest = s;
-      // 3. save only after real movement
-      final last = _points.isEmpty ? null : _points.last;
+      // 4. save only after real movement
       if (last == null || distanceBetween(last, s) >= minSpacingM) {
         if (last != null) _distanceM += distanceBetween(last, s);
         _points.add(s);

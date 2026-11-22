@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:backtrack/core/geo.dart';
+import 'package:backtrack/core/gps_gate.dart';
 import 'package:backtrack/core/kalman.dart';
 import 'package:backtrack/services/recorder.dart';
 import 'package:backtrack/services/track_store.dart';
@@ -27,6 +28,7 @@ void main() {
       positions: () => gps.stream,
       // pass-through: these tests check the pipeline, not smoothing
       smoother: PositionSmoother(processNoiseMps: 1e6),
+      warmup: GpsWarmup(requiredFixes: 1, maxAccuracyM: 25),
       now: () => DateTime.utc(2026, 1, 1),
     );
   });
@@ -95,6 +97,7 @@ void main() {
       positions: () => gps.stream,
       // pass-through: these tests check the pipeline, not smoothing
       smoother: PositionSmoother(processNoiseMps: 1e6),
+      warmup: GpsWarmup(requiredFixes: 1, maxAccuracyM: 25),
       now: () => DateTime.utc(2026, 1, 1),
     );
     final resumed = await rec2.restore();
@@ -118,6 +121,7 @@ void main() {
       positions: () => gps.stream,
       // pass-through: these tests check the pipeline, not smoothing
       smoother: PositionSmoother(processNoiseMps: 1e6),
+      warmup: GpsWarmup(requiredFixes: 1, maxAccuracyM: 25),
       now: () => DateTime.utc(2026, 1, 1),
     );
     expect(await rec2.restore(), isFalse);

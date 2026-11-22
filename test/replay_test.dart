@@ -35,6 +35,24 @@ TrackPoint shift(TrackPoint p, double n, double e, {double? acc}) {
   );
 }
 
+/// What really happens at the start: you press Record and stand still
+/// while the GPS settles. Doppler speed ~0.
+List<TrackPoint> standStill(TrackPoint at, int seconds, {math.Random? r}) {
+  final out = <TrackPoint>[];
+  for (var i = seconds; i > 0; i--) {
+    final p = r == null ? at : shift(at, gaussian(r) * 2, gaussian(r) * 2);
+    out.add(TrackPoint(
+      lat: p.lat,
+      lon: p.lon,
+      accuracyM: 6,
+      speedMps: 0.1,
+      altitudeM: at.altitudeM,
+      time: at.time.subtract(Duration(seconds: i)),
+    ));
+  }
+  return out;
+}
+
 double gaussian(math.Random r) =>
     math.sqrt(-2 * math.log(1 - r.nextDouble())) *
     math.cos(2 * math.pi * r.nextDouble());
@@ -64,7 +82,7 @@ void main() {
   });
 
   test('clean replay keeps distance, corners and closes the loop', () async {
-    final rec = await replay(truth);
+    final rec = await replay([...standStill(truth.first, 10), ...truth]);
     expect(rec.distanceM, closeTo(trueLengthM, trueLengthM * 0.05));
     expect(maxGap(rec.points), lessThan(10));
     expect(distanceBetween(rec.points.first, rec.points.last), lessThan(5));
@@ -81,7 +99,7 @@ void main() {
       if (i == 200) p = shift(p, 0, 80, acc: 60); // bad-accuracy fix
       noisy.add(p);
     }
-    final rec = await replay(noisy);
+    final rec = await replay([...standStill(truth.first, 10, r: r), ...noisy]);
 
     // Distance: noise adds a little zig-zag, must stay within 15 %.
     expect(rec.distanceM, closeTo(trueLengthM, trueLengthM * 0.15));
@@ -101,5 +119,46 @@ void main() {
           rec.points.map((p) => distanceBetween(c, p)).reduce(math.min);
       expect(nearest, lessThan(8), reason: 'corner lost: $nearest m');
     }
+  });
+
+  test('standing still for 2 min while GPS drifts draws no line', () async {
+    // Balcony case: position wanders ~15 m, Doppler says ~0 m/s.
+    final r = math.Random(7);
+    final fixes = <TrackPoint>[];
+    var n = 0.0, e = 0.0;
+    for (var i = 0; i < 120; i++) {
+      n += gaussian(r) * 1.0;
+      e += gaussian(r) * 1.0;
+      final p = shift(truth.first, n, e, acc: 6);
+      fixes.add(TrackPoint(
+        lat: p.lat,
+        lon: p.lon,
+        accuracyM: 6,
+        speedMps: r.nextDouble() * 0.3,
+        time: truth.first.time.add(Duration(seconds: i)),
+      ));
+    }
+    final rec = await replay(fixes);
+    expect(rec.points.length, lessThanOrEqualTo(1));
+    expect(rec.distanceM, 0);
+  });
+
+  test('cold start: GPS sliding into place is not drawn as a line', () async {
+    // First fixes slide 30 m (each claims 8 m accuracy) then settle.
+    final fixes = <TrackPoint>[];
+    for (var i = 0; i < 6; i++) {
+      final p = shift(truth.first, 30 - i * 6.0, 0, acc: 8);
+      fixes.add(TrackPoint(
+        lat: p.lat,
+        lon: p.lon,
+        accuracyM: 8,
+        time: truth.first.time.subtract(Duration(seconds: 30 - i)),
+      ));
+    }
+    fixes.addAll(standStill(truth.first, 10));
+    final rec = await replay(fixes);
+    expect(rec.points.length, 1);
+    expect(distanceBetween(rec.points.first, truth.first), lessThan(3));
+    expect(rec.distanceM, 0);
   });
 }

@@ -18,6 +18,7 @@ class TrackStore {
 
   final Directory dir;
   File? _current;
+  File? _raw;
 
   static String _stamp(DateTime t) {
     final u = t.toUtc();
@@ -29,7 +30,17 @@ class TrackStore {
   Future<void> startSession(DateTime start) async {
     await dir.create(recursive: true);
     _current = File('${dir.path}/session_${_stamp(start)}.jsonl');
+    _raw = File('${dir.path}/raw_${_stamp(start)}.jsonl');
     await _current!.writeAsString('', flush: true);
+  }
+
+  /// Every fix the GPS delivered, before any filtering. Lets us replay a
+  /// real walk on the PC and tune filters against real data.
+  Future<void> appendRaw(TrackPoint p) async {
+    final f = _raw;
+    if (f == null) return;
+    await f.writeAsString('${jsonEncode(p.toJson())}\n',
+        mode: FileMode.append);
   }
 
   Future<void> append(TrackPoint p) async {
@@ -45,6 +56,7 @@ class TrackStore {
     await f.writeAsString('${jsonEncode({'end': true})}\n',
         mode: FileMode.append, flush: true);
     _current = null;
+    _raw = null;
   }
 
   Future<StoredSession?> loadLatest() async {
@@ -52,7 +64,9 @@ class TrackStore {
     final files = dir
         .listSync()
         .whereType<File>()
-        .where((f) => f.path.endsWith('.jsonl'))
+        .where((f) =>
+            f.uri.pathSegments.last.startsWith('session_') &&
+            f.path.endsWith('.jsonl'))
         .toList()
       ..sort((a, b) => a.path.compareTo(b.path));
     if (files.isEmpty) return null;
@@ -76,5 +90,8 @@ class TrackStore {
   }
 
   /// Continue appending to an unfinished session after a restart.
-  void resume(File file) => _current = file;
+  void resume(File file) {
+    _current = file;
+    _raw = File(file.path.replaceFirst('session_', 'raw_'));
+  }
 }

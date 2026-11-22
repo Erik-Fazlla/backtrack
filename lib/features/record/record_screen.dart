@@ -185,7 +185,9 @@ class _RecordScreenState extends State<RecordScreen> {
                             child: Text(
                               switch (rec.state) {
                                 RecState.waitingForFix =>
-                                  'Waiting for GPS…\nStay under open sky for a moment.',
+                                  'Getting an accurate position… '
+                                      '${rec.warmupProgress}/${rec.warmupRequired}\n'
+                                      'Stand still under open sky.',
                                 _ => 'Press Record at your starting point.\nNo signal or internet needed.',
                               },
                               textAlign: TextAlign.center,
@@ -198,6 +200,9 @@ class _RecordScreenState extends State<RecordScreen> {
                 ),
               ),
             ),
+            if (rec.state == RecState.recording && !rec.moving)
+              Text('Standing still: trail paused',
+                  style: Theme.of(context).textTheme.labelMedium),
             _Stats(items: [
               ('Distance', _km(rec.distanceM)),
               ('Time', _duration()),
