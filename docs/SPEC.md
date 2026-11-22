@@ -86,6 +86,8 @@ GPS receivers listen to satellites directly — no cell or data connection neede
 | F16 | **Battery saver mode** — longer interval between points. |
 | F17 | **Waypoints** — drop a pin ("car", "junction", "water") while recording. |
 | F18 | **Trail coloured by grade** — optional: line colour shows steepness (green flat → red steep). |
+| F18a | **Settings & appearance** — light/dark map, app theme, category + trail colours (§13a). |
+| F18b | **Region import** — Stage 1 offline map process (§9). |
 
 ### v0.3+
 | # | Feature |
@@ -94,6 +96,7 @@ GPS receivers listen to satellites directly — no cell or data connection neede
 | F20 | More stats per journey (pace splits, moving vs stopped time). |
 | F21 | Turn-around reminder (time or distance based). |
 | F22 | Dark / high-contrast "low light" theme. |
+| F22a | **In-app region download** — Stage 2 offline map process (§9). |
 | F23 | Offline terrain data (Mapterhorn DEM PMTiles) to correct elevation on phones without a barometer. |
 
 ### Out of scope (explicitly)
@@ -104,6 +107,7 @@ Accounts, cloud sync, social feed, turn-by-turn routing, search for addresses. E
 | Concern | Choice | License / cost | Notes |
 |---|---|---|---|
 | Framework | **Flutter** (Dart) | BSD, free | Matches device-feature stack rule. |
+| Tooling | **Android Studio** (Android SDK, emulator, device logs) + Flutter plugin; code editing in Android Studio or VS Code | free | Builds run with `flutter run` onto Erik's phone over USB/Wi-Fi debugging. |
 | Location | **geolocator** | MIT, free | Android `foregroundNotificationConfig` keeps stream alive with screen off. *Not* `flutter_background_geolocation` (paid licence for Android release). |
 | Wake / service hardening | Android foreground service type `location`, battery-optimization exemption prompt | free | Needed against Doze / OEM killers (Xiaomi, Samsung). |
 | Compass | **flutter_compass** | MIT | Heading for arrow + map rotation. Fallback to GPS bearing when moving. |
@@ -152,7 +156,23 @@ Recovery: on launch, an unfinished journey in DB → "Resume recording or finish
 
 ## 9. Offline maps at $0 — the plan
 
-**What a "region" means:** an offline map of the whole world is ~120 GB, too big for a phone. So the map is cut into areas ("regions") — e.g. *Attica*, *Greece*, *Peloponnese*. You download only the region you'll be in, before you go, while you still have Wi-Fi. "First region" = the first area we cut and test with. Proposed: **Greece** (one file, covers home + most hikes; size to be measured, expected a few hundred MB). If too big → **Attica** first.
+**What a "region" means:** an offline map of the whole world is ~120 GB, too big for a phone. So the map is cut into areas ("regions") — e.g. *Attica*, *Greece*, *Peloponnese*. You download only the region you'll be in, before you go, while you still have Wi-Fi. **First region: Greece** (size to be measured; expected a few hundred MB at max zoom 15).
+
+### Getting a new region (e.g. trip to Italy)
+
+**Stage 1 (v0.2) — PC script + import.** Repo is private, so the app can't download from its GitHub Releases without a token; keep it simple:
+1. On PC: `tools/cut_region.ps1 -Name italy -Country IT` (or `-Bbox minLon,minLat,maxLon,maxLat`). Script runs the free `pmtiles extract` against the latest Protomaps daily build and writes `italy.pmtiles`. Only the needed bytes are downloaded, not the planet.
+2. Copy the file to the phone (USB cable, or Google Drive / any cloud you already use).
+3. In app: **Settings → Offline maps → Import map file** → pick `italy.pmtiles`. App copies it into its storage, reads its bounds, lists it.
+4. Map automatically uses whichever downloaded region covers where you are.
+
+**Stage 2 (v0.3) — download inside the app, no PC.**
+1. **Settings → Offline maps → Add region** → pick a country from a built-in list, *or* pan the map and drag a rectangle ("download this area").
+2. App shows estimated size → **Download** (Wi-Fi recommended, resumable).
+3. App fetches only the tiles inside that area straight from the free Protomaps daily build (HTTP range requests, same thing `pmtiles extract` does) and saves them as a local region file.
+- Low-volume personal use; if Protomaps' terms or availability change, Stage 1 still works.
+
+**Managing regions:** list with name, size, map date; **Update** (re-download newer data) and **Delete** to free space.
 
 **Rule:** never bulk-download from `tile.openstreetmap.org` — its usage policy forbids it.
 
@@ -259,6 +279,22 @@ GPS altitude alone is noisy (±10–20 m jumps), which would show fake hills and
 
 Privacy: no data leaves the phone. No analytics. State this in onboarding.
 
+## 13a. Settings & appearance
+
+| Setting | Options | Default |
+|---|---|---|
+| **Map style** | Light · Dark (Protomaps `light` / `dark` themes; also usable: white, grayscale, black) | Light |
+| **App theme** | Light · Dark · Follow system | Follow system |
+| **Category colours** | Colour picker per category (Run, Hike, …). Used for lines in Map view and library chips. | Run orange · Hike green · Walk blue · Bike purple · Other grey |
+| **Live trail colour** | Colour picker for the line being recorded | Orange |
+| **Guide line colour** | Colour of a saved trail you are following | Category colour |
+| Units | Metric · Imperial | Metric |
+| Off-trail distance | 20 / 30 / 50 m | 30 m |
+| GPS interval | Normal (5 m) · Battery saver (15 m) | Normal |
+| Offline maps | Import / add / update / delete regions (§9) | — |
+
+Rules: no-map grid background follows the map style (light grid / dark grid). Colour pickers offer a preset palette checked for contrast on both light and dark maps, plus custom. Settings stored locally (drift `settings` table or shared_preferences).
+
 ## 14. UX principles
 
 - **One big button.** Record is the home screen hero.
@@ -305,6 +341,9 @@ Privacy: no data leaves the phone. No analytics. State this in onboarding.
 | App name | ✅ Backtrack |
 | Repo | ✅ Private, `Erik-Fazlla/backtrack` |
 | Distribution | ✅ Personal use, direct install, no store |
-| First map region | ⏳ Proposed Greece (fallback Attica) |
+| First map region | ✅ Greece |
+| New regions | ✅ Stage 1 PC script + import (v0.2), Stage 2 in-app download (v0.3) |
+| Map style | ✅ Light / dark selectable in settings; colours customizable |
+| Tooling | ✅ Flutter + Android Studio |
 | Default categories | ⏳ Proposed Run, Hike, Walk, Bike, Other |
 | Follow saved journey: arrow to start or end by default | ⏳ Proposed: ask each time |
