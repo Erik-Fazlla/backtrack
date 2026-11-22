@@ -46,6 +46,15 @@ void main() {
     expect(f.accept(p(37.990, 23.730, sec: 600)), isTrue);
   });
 
+  test('skips points closer than minSpacing to the last saved one', () {
+    final f = PointFilter(minSpacingM: 3);
+    expect(f.accept(p(37.98000, 23.73, sec: 0)), isTrue);
+    // ~1.1 m away -> standing still / jitter, not saved
+    expect(f.accept(p(37.98001, 23.73, sec: 1)), isFalse);
+    // ~4.4 m from the first -> saved
+    expect(f.accept(p(37.98004, 23.73, sec: 3)), isTrue);
+  });
+
   test('reset forgets the last point', () {
     final f = PointFilter(maxSpeedMps: 15);
     f.accept(p(37.980, 23.730, sec: 0));

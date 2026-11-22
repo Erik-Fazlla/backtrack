@@ -22,10 +22,16 @@ Future<void> main() async {
 }
 
 class BacktrackApp extends StatelessWidget {
-  const BacktrackApp({super.key, required this.recorder, this.location});
+  const BacktrackApp({
+    super.key,
+    required this.recorder,
+    this.location,
+    this.showTiles = true,
+  });
 
   final Recorder recorder;
   final LocationService? location;
+  final bool showTiles;
 
   @override
   Widget build(BuildContext context) {
@@ -38,7 +44,8 @@ class BacktrackApp extends StatelessWidget {
           colorSchemeSeed: seed,
           brightness: Brightness.dark,
           useMaterial3: true),
-      home: RecordScreen(recorder: recorder, location: location),
+      home: RecordScreen(
+          recorder: recorder, location: location, showTiles: showTiles),
     );
   }
 }

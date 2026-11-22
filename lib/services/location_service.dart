@@ -44,12 +44,16 @@ class LocationService {
 
   /// Continuous fixes. On Android this runs inside a foreground service
   /// (persistent notification), so it keeps going with the screen off.
-  Stream<TrackPoint> positions({int distanceFilterM = 5}) {
+  ///
+  /// distanceFilter is 0 on purpose: we want a fix every second so the
+  /// "you are here" dot moves smoothly. Recorder decides which fixes are
+  /// saved to the trail (PointFilter.minSpacingM).
+  Stream<TrackPoint> positions({int distanceFilterM = 0}) {
     final LocationSettings settings = Platform.isAndroid
         ? AndroidSettings(
             accuracy: LocationAccuracy.best,
             distanceFilter: distanceFilterM,
-            intervalDuration: const Duration(seconds: 2),
+            intervalDuration: const Duration(seconds: 1),
             useMSLAltitude: true,
             foregroundNotificationConfig: const ForegroundNotificationConfig(
               notificationTitle: 'Backtrack is recording',

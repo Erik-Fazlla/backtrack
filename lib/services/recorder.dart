@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../core/geo.dart';
+import '../core/kalman.dart';
 import '../core/point_filter.dart';
 import 'track_store.dart';
 
@@ -16,8 +17,15 @@ class Recorder extends ChangeNotifier {
     required this.positions,
     DateTime Function()? now,
     PointFilter? filter,
+    this.minSpacingM = 5,
+    PositionSmoother? smoother,
   })  : _now = now ?? DateTime.now,
-        _filter = filter ?? PointFilter();
+        _filter = filter ?? PointFilter(),
+        _smoother = smoother ?? PositionSmoother();
+
+  /// Save a smoothed point only after moving this far from the last one.
+  final double minSpacingM;
+  final PositionSmoother _smoother;
 
   final TrackStore store;
   final Stream<TrackPoint> Function() positions;
@@ -49,6 +57,7 @@ class Recorder extends ChangeNotifier {
     _points.clear();
     _distanceM = 0;
     _filter.reset();
+    _smoother.reset();
     _startedAt = _now();
     await store.startSession(_startedAt!);
     _state = RecState.waitingForFix;
@@ -67,8 +76,10 @@ class Recorder extends ChangeNotifier {
     _distanceM = trailDistance(_points);
     _startedAt = _points.first.time;
     _filter.reset();
+    _smoother.reset();
     for (final p in _points) {
       _filter.accept(p);
+      _smoother.update(p);
     }
     if (s.finished) {
       _state = RecState.stopped;
@@ -103,11 +114,19 @@ class Recorder extends ChangeNotifier {
       return;
     }
     _latest = p;
+    // 1. drop bad fixes (poor accuracy, impossible jumps) on the raw data
     if (_filter.accept(p)) {
-      if (_points.isNotEmpty) _distanceM += distanceBetween(_points.last, p);
-      _points.add(p);
-      _state = RecState.recording;
-      _writes = _writes.then((_) => store.append(p));
+      // 2. smooth jitter
+      final s = _smoother.update(p);
+      _latest = s;
+      // 3. save only after real movement
+      final last = _points.isEmpty ? null : _points.last;
+      if (last == null || distanceBetween(last, s) >= minSpacingM) {
+        if (last != null) _distanceM += distanceBetween(last, s);
+        _points.add(s);
+        _state = RecState.recording;
+        _writes = _writes.then((_) => store.append(s));
+      }
     }
     notifyListeners();
   }

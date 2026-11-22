@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:backtrack/core/geo.dart';
+import 'package:backtrack/core/kalman.dart';
 import 'package:backtrack/main.dart';
 import 'package:backtrack/services/recorder.dart';
 import 'package:backtrack/services/track_store.dart';
@@ -15,9 +16,12 @@ void main() {
     // Built in the real zone: its write-chain futures must not depend on
     // the fake-async microtask queue, or awaiting them inside runAsync hangs.
     final rec = (await tester.runAsync(() async =>
-        Recorder(store: TrackStore(dir), positions: () => gps.stream)))!;
+        Recorder(
+            store: TrackStore(dir),
+            positions: () => gps.stream,
+            smoother: PositionSmoother(processNoiseMps: 1e6))))!;
 
-    await tester.pumpWidget(BacktrackApp(recorder: rec));
+    await tester.pumpWidget(BacktrackApp(recorder: rec, showTiles: false));
     expect(find.text('Record'), findsOneWidget);
     expect(find.textContaining('Press Record'), findsOneWidget);
 

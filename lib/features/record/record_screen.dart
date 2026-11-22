@@ -5,13 +5,19 @@ import 'package:flutter/material.dart';
 import '../../core/geo.dart';
 import '../../services/location_service.dart';
 import '../../services/recorder.dart';
-import 'trail_painter.dart';
+import 'trail_map.dart';
 
 /// M0 screen: one big button, live trail on a grid, test stats.
 class RecordScreen extends StatefulWidget {
-  const RecordScreen({super.key, required this.recorder, this.location});
+  const RecordScreen({
+    super.key,
+    required this.recorder,
+    this.location,
+    this.showTiles = true,
+  });
 
   final Recorder recorder;
+  final bool showTiles;
 
   /// Null in widget tests: permissions are skipped.
   final LocationService? location;
@@ -157,38 +163,37 @@ class _RecordScreenState extends State<RecordScreen> {
                 child: Stack(
                   children: [
                     Positioned.fill(
-                      child: CustomPaint(
+                      child: TrailMap(
                         key: const Key('trail'),
-                        painter: TrailPainter(
-                          points: pts,
-                          current: current,
-                          trailColor: const Color(0xFFFF6B00),
-                          gridColor: cs.outlineVariant.withValues(alpha: 0.4),
-                          startColor: const Color(0xFF2E9E4F),
-                          meColor: const Color(0xFF1E6FE8),
-                        ),
+                        points: pts,
+                        current: current,
+                        recording: rec.state == RecState.recording ||
+                            rec.state == RecState.waitingForFix,
+                        showTiles: widget.showTiles,
                       ),
                     ),
                     if (pts.isEmpty)
-                      Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(24),
-                          child: Text(
-                            switch (rec.state) {
-                              RecState.waitingForFix =>
-                                'Waiting for GPS…\nStay under open sky for a moment.',
-                              _ => 'Press Record at your starting point.\nNo signal or internet needed.',
-                            },
-                            textAlign: TextAlign.center,
-                            style: Theme.of(context).textTheme.titleMedium,
+                      Positioned(
+                        left: 12,
+                        right: 12,
+                        top: 12,
+                        child: Material(
+                          color: cs.surface.withValues(alpha: 0.92),
+                          borderRadius: BorderRadius.circular(14),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Text(
+                              switch (rec.state) {
+                                RecState.waitingForFix =>
+                                  'Waiting for GPS…\nStay under open sky for a moment.',
+                                _ => 'Press Record at your starting point.\nNo signal or internet needed.',
+                              },
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context).textTheme.titleSmall,
+                            ),
                           ),
                         ),
                       ),
-                    const Positioned(
-                      left: 12,
-                      top: 10,
-                      child: Text('Grid: 50 m'),
-                    ),
                   ],
                 ),
               ),

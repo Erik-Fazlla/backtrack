@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:backtrack/core/geo.dart';
+import 'package:backtrack/core/kalman.dart';
 import 'package:backtrack/services/recorder.dart';
 import 'package:backtrack/services/track_store.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -24,6 +25,8 @@ void main() {
     rec = Recorder(
       store: TrackStore(dir),
       positions: () => gps.stream,
+      // pass-through: these tests check the pipeline, not smoothing
+      smoother: PositionSmoother(processNoiseMps: 1e6),
       now: () => DateTime.utc(2026, 1, 1),
     );
   });
@@ -90,6 +93,8 @@ void main() {
     final rec2 = Recorder(
       store: TrackStore(dir),
       positions: () => gps.stream,
+      // pass-through: these tests check the pipeline, not smoothing
+      smoother: PositionSmoother(processNoiseMps: 1e6),
       now: () => DateTime.utc(2026, 1, 1),
     );
     final resumed = await rec2.restore();
@@ -111,6 +116,8 @@ void main() {
     final rec2 = Recorder(
       store: TrackStore(dir),
       positions: () => gps.stream,
+      // pass-through: these tests check the pipeline, not smoothing
+      smoother: PositionSmoother(processNoiseMps: 1e6),
       now: () => DateTime.utc(2026, 1, 1),
     );
     expect(await rec2.restore(), isFalse);
