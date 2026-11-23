@@ -2,12 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:vector_map_tiles/vector_map_tiles.dart';
 import 'package:vector_map_tiles_pmtiles/vector_map_tiles_pmtiles.dart';
-import 'package:vector_tile_renderer/vector_tile_renderer.dart' as vtr;
 
 import '../../core/geo.dart';
 import '../../services/app_settings.dart';
+import '../map/base_map.dart';
 
 /// Real map with the trail drawn on top.
 ///
@@ -46,15 +45,6 @@ class TrailMap extends StatefulWidget {
   @override
   State<TrailMap> createState() => _TrailMapState();
 }
-
-// Building a map theme parses a big style; do it once per style.
-// V4 = Protomaps basemap v4, the format of current daily builds.
-final _themes = <MapStyle, vtr.Theme>{};
-vtr.Theme _themeFor(MapStyle s) => _themes.putIfAbsent(
-    s,
-    () => s == MapStyle.dark
-        ? ProtomapsThemes.darkV4()
-        : ProtomapsThemes.lightV4());
 
 class _TrailMapState extends State<TrailMap>
     with SingleTickerProviderStateMixin {
@@ -112,7 +102,6 @@ class _TrailMapState extends State<TrailMap>
   bool _follow = true;
 
   static const _athens = LatLng(37.9838, 23.7275);
-  static const double _maxMapZoom = 19;
 
   LatLng _ll(TrackPoint p) => LatLng(p.lat, p.lon);
 
@@ -175,7 +164,7 @@ class _TrailMapState extends State<TrailMap>
           options: MapOptions(
             initialCenter: initial,
             initialZoom: me != null || start != null ? 17 : 12,
-            maxZoom: _maxMapZoom,
+            maxZoom: maxMapZoom,
             backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
             interactionOptions: const InteractionOptions(
               flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
@@ -189,26 +178,11 @@ class _TrailMapState extends State<TrailMap>
             },
           ),
           children: [
-            if (widget.offlineTiles != null)
-              VectorTileLayer(
-                key: ValueKey(widget.offlineTiles),
-                tileProviders:
-                    TileProviders({'protomaps': widget.offlineTiles!}),
-                theme: _themeFor(widget.style),
-                // Highest zoom the map may show (not the file's detail
-                // level); the file's z15 data is over-zoomed for closer views.
-                maximumZoom: _maxMapZoom,
-                // Draw vectors directly. The default raster mode renders
-                // tiles to images and showed nothing on the test phone
-                // (Xiaomi, Mali GPU, Impeller) with no error.
-                layerMode: VectorTileLayerMode.vector,
-              )
-            else if (widget.showTiles)
-              TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.erikfazlla.backtrack',
-                maxNativeZoom: 19,
-              ),
+            ...baseMapLayers(
+              offlineTiles: widget.offlineTiles,
+              style: widget.style,
+              showTiles: widget.showTiles,
+            ),
             if (me != null && widget.recording)
               CircleLayer(circles: [
                 CircleMarker(
@@ -250,13 +224,7 @@ class _TrailMapState extends State<TrailMap>
                 ),
             ]),
             if (widget.showTiles || widget.offlineTiles != null)
-              const RichAttributionWidget(
-                alignment: AttributionAlignment.bottomLeft,
-                attributions: [
-                  TextSourceAttribution('OpenStreetMap contributors'),
-                  TextSourceAttribution('Protomaps'),
-                ],
-              ),
+              mapAttribution(),
           ],
         ),
         Positioned(

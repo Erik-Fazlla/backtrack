@@ -4,7 +4,12 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../app_services.dart';
+import '../../core/elevation.dart';
 import '../../core/geo.dart';
+import '../follow/follow_screen.dart';
+import '../journeys/format.dart';
+import '../journeys/save_journey_sheet.dart';
 import '../../core/map_region.dart';
 import '../../services/app_settings.dart';
 import '../../services/location_service.dart';
@@ -20,9 +25,12 @@ class RecordScreen extends StatefulWidget {
     this.location,
     this.settings,
     this.maps,
+    this.services,
     this.showTiles = true,
   });
 
+  /// Repo + navigation targets for Save / Take me back (null in old tests).
+  final AppServices? services;
   final Recorder recorder;
   final AppSettings? settings;
   final OfflineMaps? maps;
@@ -87,7 +95,10 @@ class _RecordScreenState extends State<RecordScreen> {
         return;
       }
     }
-    setState(() => _problem = null);
+    setState(() {
+      _problem = null;
+      _savedId = null;
+    });
     await rec.start();
   }
 
@@ -184,6 +195,48 @@ class _RecordScreenState extends State<RecordScreen> {
     );
   }
 
+  /// Id of the journey saved from the current recording (null = not saved).
+  int? _savedId;
+
+  Future<void> _save() async {
+    final svc = widget.services;
+    if (svc == null || rec.points.length < 2) return;
+    final cats = await svc.repo.categories();
+    if (!mounted) return;
+    final choice = await showSaveJourneySheet(
+      context,
+      categories: cats,
+      defaultName: 'Journey · ${formatDate(rec.points.first.time)}',
+    );
+    if (choice == null) return;
+    final id = await svc.repo.save(
+      name: choice.name,
+      categoryId: choice.categoryId,
+      points: rec.points,
+    );
+    svc.notifyJourneysChanged();
+    if (!mounted) return;
+    setState(() => _savedId = id);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Saved "${choice.name.isEmpty ? 'Journey' : choice.name}" to your Library.')),
+    );
+  }
+
+  void _takeMeBack() {
+    final svc = widget.services;
+    if (svc == null || rec.points.length < 2) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FollowScreen(
+          services: svc,
+          trail: rec.points,
+          title: 'Back to start',
+        ),
+      ),
+    );
+  }
+
   Future<void> _confirmStop() async {
     final ok = await showDialog<bool>(
       context: context,
@@ -214,6 +267,17 @@ class _RecordScreenState extends State<RecordScreen> {
     final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
     final sec = d.inSeconds.remainder(60).toString().padLeft(2, '0');
     return h > 0 ? '$h:$m:$sec' : '${d.inMinutes}:$sec';
+  }
+
+  /// "Altitude" label with uphill/downhill over the last 50 m.
+  String _slopeLabel() {
+    final g = currentGrade(rec.points);
+    if (g == null || rec.state != RecState.recording) return 'Altitude';
+    return switch (gradeLabel(g)) {
+      Slope.uphill => 'Uphill ${g.toStringAsFixed(0)}%',
+      Slope.downhill => 'Downhill ${(-g).toStringAsFixed(0)}%',
+      Slope.flat => 'Flat',
+    };
   }
 
   String _km(double m) =>
@@ -345,7 +409,7 @@ class _RecordScreenState extends State<RecordScreen> {
               ('GPS ±', rec.lastAccuracyM == null
                   ? '–'
                   : '${rec.lastAccuracyM!.toStringAsFixed(0)} m'),
-              ('Altitude', alt == null ? '–' : '${alt.toStringAsFixed(0)} m'),
+              (_slopeLabel(), alt == null ? '–' : '${alt.toStringAsFixed(0)} m'),
               ('Max gap', _km(maxGap(pts))),
             ]),
             if (rec.error != null)
@@ -354,11 +418,55 @@ class _RecordScreenState extends State<RecordScreen> {
                 child: Text('GPS error: ${rec.error}',
                     style: TextStyle(color: cs.error)),
               ),
+            if (rec.state == RecState.stopped &&
+                pts.length >= 2 &&
+                widget.services != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: SizedBox(
+                        height: 56,
+                        child: FilledButton.icon(
+                          key: const Key('take_me_back'),
+                          onPressed: _takeMeBack,
+                          icon: const Icon(Icons.u_turn_left),
+                          label: const Text('Take me back'),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFF1E6FE8),
+                            textStyle: const TextStyle(
+                                fontSize: 17, fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: SizedBox(
+                        height: 56,
+                        child: OutlinedButton.icon(
+                          key: const Key('save_journey'),
+                          onPressed: _savedId == null ? _save : null,
+                          icon: Icon(_savedId == null
+                              ? Icons.bookmark_add_outlined
+                              : Icons.check),
+                          label: Text(_savedId == null ? 'Save' : 'Saved'),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
               child: SizedBox(
                 width: double.infinity,
-                height: 64,
+                height: rec.state == RecState.stopped &&
+                        pts.length >= 2 &&
+                        widget.services != null
+                    ? 48
+                    : 64,
                 child: switch (rec.state) {
                   RecState.idle || RecState.stopped => FilledButton.icon(
                       key: const Key('record'),
