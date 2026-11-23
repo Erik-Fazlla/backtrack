@@ -54,4 +54,27 @@ void main() {
       }
     });
   }
+
+  // 10-min street walk (2026-11-23, Google/fused mode). For 31 s the phone
+  // reported ~0 m/s speed while walking 47 m; the standing-still gate
+  // froze the trail and left a 47 m hole.
+  test('real walk street_walk_fused: wrong ~0 speed does not freeze trail',
+      () async {
+    final raw = load('test/fixtures/street_walk_fused.jsonl');
+    final dir = Directory.systemTemp.createTempSync('bt_realwalk');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final gps = StreamController<TrackPoint>.broadcast();
+    final rec = Recorder(store: TrackStore(dir), positions: () => gps.stream);
+    await rec.start();
+    for (final p in raw) {
+      gps.add(p);
+    }
+    await Future<void>.delayed(Duration.zero);
+    await rec.stop();
+    await gps.close();
+
+    expect(maxGap(rec.points), lessThan(15));
+    final rawLen = trailDistance(raw);
+    expect(rec.distanceM, closeTo(rawLen, rawLen * 0.15));
+  });
 }

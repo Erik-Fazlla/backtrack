@@ -73,6 +73,7 @@ class Recorder extends ChangeNotifier {
   Future<void> start() async {
     _points.clear();
     _lastGood = null;
+    _recent.clear();
     _distanceM = 0;
     _filter.reset();
     _smoother.reset();
@@ -149,7 +150,15 @@ class Recorder extends ChangeNotifier {
     }
     // 1. drop bad fixes (poor accuracy, impossible jumps) on the raw data
     if (_filter.accept(p)) {
-      _moving = isMoving(p);
+      _recent.add(p);
+      while (_recent.isNotEmpty &&
+          p.time.difference(_recent.first.time) > _moveWindow) {
+        _recent.removeAt(0);
+      }
+      // Doppler speed says still, but some phones (seen with Google/fused
+      // location) report ~0 m/s while you walk. Real displacement over the
+      // last 10 s overrides it; standing-still drift rarely gets that far.
+      _moving = isMoving(p) || _displacedSteadily();
       final last = _points.isEmpty ? null : _points.last;
       // 2. standing still: GPS drifts but Doppler speed is ~0 -> freeze
       if (last != null && !_moving) {
@@ -173,6 +182,25 @@ class Recorder extends ChangeNotifier {
 
   /// Latest smoothed position that passed the filters, saved or not.
   TrackPoint? _lastGood;
+
+  /// Recent accepted raw fixes, for the displacement-based moving check.
+  final List<TrackPoint> _recent = [];
+  static const _moveWindow = Duration(seconds: 10);
+  static const double _moveWindowMinM = 10;
+
+  /// Moved at least 10 m in the last 10 s, in a fairly straight line (net
+  /// distance >= 80 % of the path). Standing-still drift zig-zags, so its
+  /// net displacement is a small share of its path.
+  bool _displacedSteadily() {
+    if (_recent.length < 3) return false;
+    final net = distanceBetween(_recent.first, _recent.last);
+    if (net < _moveWindowMinM) return false;
+    var path = 0.0;
+    for (var i = 1; i < _recent.length; i++) {
+      path += distanceBetween(_recent[i - 1], _recent[i]);
+    }
+    return net >= 0.8 * path;
+  }
 
   Future<void> stop() async {
     await _sub?.cancel();
