@@ -22,6 +22,17 @@ void main() {
     expect(again.gpsMode, GpsMode.fused);
   });
 
+  test('map style persists and does not reset gps mode', () async {
+    final f = File('${dir.path}/settings.json');
+    final s = AppSettings(f);
+    await s.setGpsMode(GpsMode.fused);
+    await s.setMapStyle(MapStyle.dark);
+    final again = AppSettings(f);
+    await again.load();
+    expect(again.mapStyle, MapStyle.dark);
+    expect(again.gpsMode, GpsMode.fused);
+  });
+
   test('corrupt file falls back to defaults', () async {
     final f = File('${dir.path}/settings.json')..writeAsStringSync('{oops');
     final s = AppSettings(f);

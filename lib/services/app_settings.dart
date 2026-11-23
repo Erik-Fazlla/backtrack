@@ -12,6 +12,9 @@ enum GpsMode {
   fused,
 }
 
+/// Look of the offline map.
+enum MapStyle { light, dark }
+
 /// Small persisted settings, stored as JSON next to the recordings.
 class AppSettings extends ChangeNotifier {
   AppSettings(this.file);
@@ -19,6 +22,8 @@ class AppSettings extends ChangeNotifier {
   final File file;
   GpsMode _gpsMode = GpsMode.satellites;
   GpsMode get gpsMode => _gpsMode;
+  MapStyle _mapStyle = MapStyle.light;
+  MapStyle get mapStyle => _mapStyle;
 
   Future<void> load() async {
     try {
@@ -28,6 +33,10 @@ class AppSettings extends ChangeNotifier {
         (m) => m.name == j['gpsMode'],
         orElse: () => GpsMode.satellites,
       );
+      _mapStyle = MapStyle.values.firstWhere(
+        (m) => m.name == j['mapStyle'],
+        orElse: () => MapStyle.light,
+      );
     } on FormatException {
       // corrupt file: keep defaults
     }
@@ -36,8 +45,20 @@ class AppSettings extends ChangeNotifier {
   Future<void> setGpsMode(GpsMode m) async {
     if (m == _gpsMode) return;
     _gpsMode = m;
+    await _save();
+  }
+
+  Future<void> setMapStyle(MapStyle m) async {
+    if (m == _mapStyle) return;
+    _mapStyle = m;
+    await _save();
+  }
+
+  Future<void> _save() async {
     notifyListeners();
     await file.parent.create(recursive: true);
-    await file.writeAsString(jsonEncode({'gpsMode': m.name}), flush: true);
+    await file.writeAsString(
+        jsonEncode({'gpsMode': _gpsMode.name, 'mapStyle': _mapStyle.name}),
+        flush: true);
   }
 }

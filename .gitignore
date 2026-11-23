@@ -45,3 +45,7 @@ app.*.map.json
 /android/app/release
 # Real GPS logs contain where you walk: keep them local
 test/real_logs/
+
+# Offline map files and the pmtiles CLI: large binaries, kept local
+maps/
+tools/bin/

@@ -1,11 +1,14 @@
 import 'dart:async';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/geo.dart';
+import '../../core/map_region.dart';
 import '../../services/app_settings.dart';
 import '../../services/location_service.dart';
+import '../../services/offline_maps.dart';
 import '../../services/recorder.dart';
 import 'trail_map.dart';
 
@@ -16,11 +19,13 @@ class RecordScreen extends StatefulWidget {
     required this.recorder,
     this.location,
     this.settings,
+    this.maps,
     this.showTiles = true,
   });
 
   final Recorder recorder;
   final AppSettings? settings;
+  final OfflineMaps? maps;
   final bool showTiles;
 
   /// Null in widget tests: permissions are skipped.
@@ -53,7 +58,12 @@ class _RecordScreenState extends State<RecordScreen> {
     if (mounted) setState(() => _batteryOk = ok);
   }
 
-  void _changed() => setState(() {});
+  void _changed() {
+    final p = rec.latest;
+    // Switch to the offline map region you are in (cheap when unchanged).
+    if (p != null) widget.maps?.useFor(p.lat, p.lon);
+    setState(() {});
+  }
 
   @override
   void dispose() {
@@ -142,6 +152,30 @@ class _RecordScreenState extends State<RecordScreen> {
                     ],
                   ),
                 ),
+                const Divider(),
+                const _SheetTitle('Map style'),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: SegmentedButton<MapStyle>(
+                    segments: const [
+                      ButtonSegment(
+                          value: MapStyle.light,
+                          icon: Icon(Icons.light_mode),
+                          label: Text('Light')),
+                      ButtonSegment(
+                          value: MapStyle.dark,
+                          icon: Icon(Icons.dark_mode),
+                          label: Text('Dark')),
+                    ],
+                    selected: {s.mapStyle},
+                    onSelectionChanged: (v) => s.setMapStyle(v.first),
+                  ),
+                ),
+                if (widget.maps != null) ...[
+                  const Divider(),
+                  const _SheetTitle('Offline maps'),
+                  _OfflineMapsSection(maps: widget.maps!),
+                ],
               ],
             ),
           ),
@@ -255,13 +289,22 @@ class _RecordScreenState extends State<RecordScreen> {
                 child: Stack(
                   children: [
                     Positioned.fill(
-                      child: TrailMap(
-                        key: const Key('trail'),
-                        points: pts,
-                        current: current,
-                        recording: rec.state == RecState.recording ||
-                            rec.state == RecState.waitingForFix,
-                        showTiles: widget.showTiles,
+                      child: ListenableBuilder(
+                        listenable: Listenable.merge([
+                          if (widget.maps != null) widget.maps!,
+                          if (widget.settings != null) widget.settings!,
+                        ]),
+                        builder: (context, _) => TrailMap(
+                          key: const Key('trail'),
+                          points: pts,
+                          current: current,
+                          recording: rec.state == RecState.recording ||
+                              rec.state == RecState.waitingForFix,
+                          showTiles: widget.showTiles,
+                          offlineTiles: widget.maps?.provider,
+                          offlineMaxZoom: widget.maps?.active?.maxZoom ?? 15,
+                          style: widget.settings?.mapStyle ?? MapStyle.light,
+                        ),
                       ),
                     ),
                     if (pts.isEmpty)
@@ -379,6 +422,125 @@ class _Stats extends StatelessWidget {
             ),
         ],
       ),
+    );
+  }
+}
+
+class _SheetTitle extends StatelessWidget {
+  const _SheetTitle(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+        child: Text(text,
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+      );
+}
+
+/// Lists downloaded map regions; import a .pmtiles file or delete one.
+class _OfflineMapsSection extends StatefulWidget {
+  const _OfflineMapsSection({required this.maps});
+  final OfflineMaps maps;
+
+  @override
+  State<_OfflineMapsSection> createState() => _OfflineMapsSectionState();
+}
+
+class _OfflineMapsSectionState extends State<_OfflineMapsSection> {
+  bool _busy = false;
+  String? _message;
+
+  Future<void> _import() async {
+    final picked =
+        await FilePicker.pickFiles(dialogTitle: 'Pick a .pmtiles map');
+    if (picked.isEmpty) return;
+    final f = picked.first;
+    setState(() {
+      _busy = true;
+      _message = 'Copying ${f.name}…';
+    });
+    try {
+      final r = await widget.maps.import(f.name, f.readAsByteStream());
+      _message = 'Added ${r.name} (${r.sizeLabel}).';
+    } on FormatException catch (e) {
+      _message = e.message;
+    } catch (e) {
+      _message = 'Import failed: $e';
+    }
+    if (mounted) setState(() => _busy = false);
+  }
+
+  Future<void> _confirmDelete(MapRegion r) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text('Delete ${r.name}?'),
+        content: Text('Frees ${r.sizeLabel}. You can import it again later.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (ok == true) await widget.maps.delete(r);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: widget.maps,
+      builder: (context, _) {
+        final regions = widget.maps.regions;
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (regions.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                child: Text('No offline map yet. Import a .pmtiles file '
+                    '(e.g. greece.pmtiles) to see the map with no signal.'),
+              ),
+            for (final r in regions)
+              ListTile(
+                leading: Icon(widget.maps.active?.path == r.path
+                    ? Icons.map
+                    : Icons.map_outlined),
+                title: Text(r.name),
+                subtitle:
+                    Text('${r.sizeLabel} · detail up to zoom ${r.maxZoom}'),
+                trailing: IconButton(
+                  tooltip: 'Delete map',
+                  icon: const Icon(Icons.delete_outline),
+                  onPressed: _busy ? null : () => _confirmDelete(r),
+                ),
+              ),
+            if (_message != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                child: Text(_message!),
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: OutlinedButton.icon(
+                onPressed: _busy ? null : _import,
+                icon: _busy
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.download),
+                label: const Text('Import map file'),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

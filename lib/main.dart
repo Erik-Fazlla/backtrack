@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'features/record/record_screen.dart';
 import 'services/app_settings.dart';
 import 'services/location_service.dart';
+import 'services/offline_maps.dart';
 import 'services/recorder.dart';
 import 'services/track_store.dart';
 
@@ -18,6 +19,8 @@ Future<void> main() async {
       await getApplicationDocumentsDirectory();
   final settings = AppSettings(File('${base.path}/settings.json'));
   await settings.load();
+  final maps = OfflineMaps(Directory('${base.path}/maps'));
+  await maps.scan();
   final location = LocationService();
   final recorder = Recorder(
     store: TrackStore(Directory('${base.path}/sessions')),
@@ -30,8 +33,13 @@ Future<void> main() async {
   );
   // If the app was killed mid-recording, pick the trail back up.
   await recorder.restore();
+  final last = recorder.points.isEmpty ? null : recorder.points.last;
+  await maps.useFor(last?.lat, last?.lon);
   runApp(BacktrackApp(
-      recorder: recorder, location: location, settings: settings));
+      recorder: recorder,
+      location: location,
+      settings: settings,
+      maps: maps));
 }
 
 class BacktrackApp extends StatelessWidget {
@@ -40,12 +48,14 @@ class BacktrackApp extends StatelessWidget {
     required this.recorder,
     this.location,
     this.settings,
+    this.maps,
     this.showTiles = true,
   });
 
   final Recorder recorder;
   final LocationService? location;
   final AppSettings? settings;
+  final OfflineMaps? maps;
   final bool showTiles;
 
   @override
@@ -63,6 +73,7 @@ class BacktrackApp extends StatelessWidget {
         recorder: recorder,
         location: location,
         settings: settings,
+        maps: maps,
         showTiles: showTiles,
       ),
     );

@@ -2,16 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:vector_map_tiles/vector_map_tiles.dart';
+import 'package:vector_map_tiles_pmtiles/vector_map_tiles_pmtiles.dart';
+import 'package:vector_tile_renderer/vector_tile_renderer.dart' as vtr;
 
 import '../../core/geo.dart';
+import '../../services/app_settings.dart';
 
 /// Real map with the trail drawn on top.
 ///
-/// Tiles: OpenStreetMap, loaded online and cached on the phone by
-/// flutter_map's built-in cache (areas you have viewed keep working for a
-/// while without signal). Full offline Greece map comes next (SPEC §9).
-/// The trail, start and "you are here" are drawn by us, so they always
-/// show even when no tiles load.
+/// Map: an offline region file (.pmtiles, OpenStreetMap data) when one is
+/// downloaded — works with no signal at all. Without one, falls back to
+/// online OpenStreetMap tiles. The trail, start and "you are here" are
+/// drawn by us, so they always show even when no map loads.
 class TrailMap extends StatefulWidget {
   const TrailMap({
     super.key,
@@ -19,7 +22,15 @@ class TrailMap extends StatefulWidget {
     required this.current,
     required this.recording,
     this.showTiles = true,
+    this.offlineTiles,
+    this.offlineMaxZoom = 15,
+    this.style = MapStyle.light,
   });
+
+  /// Offline map for the current region, or null.
+  final PmTilesVectorTileProvider? offlineTiles;
+  final int offlineMaxZoom;
+  final MapStyle style;
 
   final List<TrackPoint> points;
   final TrackPoint? current;
@@ -35,6 +46,15 @@ class TrailMap extends StatefulWidget {
   @override
   State<TrailMap> createState() => _TrailMapState();
 }
+
+// Building a map theme parses a big style; do it once per style.
+// V4 = Protomaps basemap v4, the format of current daily builds.
+final _themes = <MapStyle, vtr.Theme>{};
+vtr.Theme _themeFor(MapStyle s) => _themes.putIfAbsent(
+    s,
+    () => s == MapStyle.dark
+        ? ProtomapsThemes.darkV4()
+        : ProtomapsThemes.lightV4());
 
 class _TrailMapState extends State<TrailMap>
     with SingleTickerProviderStateMixin {
@@ -168,7 +188,15 @@ class _TrailMapState extends State<TrailMap>
             },
           ),
           children: [
-            if (widget.showTiles)
+            if (widget.offlineTiles != null)
+              VectorTileLayer(
+                key: ValueKey(widget.offlineTiles),
+                tileProviders:
+                    TileProviders({'protomaps': widget.offlineTiles!}),
+                theme: _themeFor(widget.style),
+                maximumZoom: widget.offlineMaxZoom.toDouble(),
+              )
+            else if (widget.showTiles)
               TileLayer(
                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 userAgentPackageName: 'com.erikfazlla.backtrack',
@@ -214,11 +242,12 @@ class _TrailMapState extends State<TrailMap>
                   child: const _Dot(color: TrailMap.meColor),
                 ),
             ]),
-            if (widget.showTiles)
+            if (widget.showTiles || widget.offlineTiles != null)
               const RichAttributionWidget(
                 alignment: AttributionAlignment.bottomLeft,
                 attributions: [
                   TextSourceAttribution('OpenStreetMap contributors'),
+                  TextSourceAttribution('Protomaps'),
                 ],
               ),
           ],
