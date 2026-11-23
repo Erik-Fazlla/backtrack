@@ -27,11 +27,23 @@ class TrackStore {
         '${two(u.hour)}${two(u.minute)}${two(u.second)}';
   }
 
-  Future<void> startSession(DateTime start) async {
+  Future<void> startSession(DateTime start,
+      {Map<String, Object?>? meta}) async {
     await dir.create(recursive: true);
     _current = File('${dir.path}/session_${_stamp(start)}.jsonl');
     _raw = File('${dir.path}/raw_${_stamp(start)}.jsonl');
     await _current!.writeAsString('', flush: true);
+    // First raw line says how it was recorded (e.g. which GPS mode).
+    await _raw!.writeAsString(
+        '${jsonEncode({'meta': meta ?? const <String, Object?>{}})}\n');
+  }
+
+  /// Session + raw log files of the most recent recording (for sharing).
+  Future<List<File>> latestFiles() async {
+    final s = await loadLatest();
+    if (s == null) return const [];
+    final raw = File(s.file.path.replaceFirst('session_', 'raw_'));
+    return [s.file, if (await raw.exists()) raw];
   }
 
   /// Every fix the GPS delivered, before any filtering. Lets us replay a

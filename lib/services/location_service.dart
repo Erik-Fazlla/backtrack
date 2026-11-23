@@ -48,7 +48,7 @@ class LocationService {
   /// distanceFilter is 0 on purpose: we want a fix every second so the
   /// "you are here" dot moves smoothly. Recorder decides which fixes are
   /// saved to the trail (PointFilter.minSpacingM).
-  Stream<TrackPoint> positions({int distanceFilterM = 0}) {
+  Stream<TrackPoint> positions({int distanceFilterM = 0, bool fused = false}) {
     final LocationSettings settings = Platform.isAndroid
         ? AndroidSettings(
             // Pure satellite GPS (LocationManager GPS_PROVIDER), not the
@@ -56,7 +56,8 @@ class LocationService {
             // a city can be 20-50 m off while claiming good accuracy, and
             // don't exist in a forest anyway. This is what the app will
             // really have offline, so test with it too.
-            forceLocationManager: true,
+            // fused=true: Google's provider (GPS + motion sensors), for A/B.
+            forceLocationManager: !fused,
             accuracy: LocationAccuracy.best,
             distanceFilter: distanceFilterM,
             intervalDuration: const Duration(seconds: 1),

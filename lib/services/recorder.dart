@@ -21,12 +21,16 @@ class Recorder extends ChangeNotifier {
     this.minSpacingM = 5,
     PositionSmoother? smoother,
     GpsWarmup? warmup,
+    this.sessionMeta,
   })  : _now = now ?? DateTime.now,
         _filter = filter ?? PointFilter(),
         _smoother = smoother ?? PositionSmoother(),
         _warmup = warmup ?? GpsWarmup();
 
   final GpsWarmup _warmup;
+
+  /// Written as the first line of each raw log (e.g. GPS mode used).
+  final Map<String, Object?> Function()? sessionMeta;
 
   /// How many settled fixes we have while waiting for GPS (UI hint).
   int get warmupProgress => _warmup.progress;
@@ -68,12 +72,13 @@ class Recorder extends ChangeNotifier {
 
   Future<void> start() async {
     _points.clear();
+    _lastGood = null;
     _distanceM = 0;
     _filter.reset();
     _smoother.reset();
     _warmup.reset();
     _startedAt = _now();
-    await store.startSession(_startedAt!);
+    await store.startSession(_startedAt!, meta: sessionMeta?.call());
     _state = RecState.waitingForFix;
     _listen();
     notifyListeners();
@@ -154,6 +159,7 @@ class Recorder extends ChangeNotifier {
       // 3. smooth jitter
       final s = _smoother.update(p);
       _latest = s;
+      _lastGood = s;
       // 4. save only after real movement
       if (last == null || distanceBetween(last, s) >= minSpacingM) {
         if (last != null) _distanceM += distanceBetween(last, s);
@@ -165,9 +171,24 @@ class Recorder extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Latest smoothed position that passed the filters, saved or not.
+  TrackPoint? _lastGood;
+
   Future<void> stop() async {
     await _sub?.cancel();
     _sub = null;
+    // The last few metres are usually under the spacing threshold and would
+    // be lost, leaving the loop open. Save where we really ended.
+    final end = _lastGood;
+    if (end != null && _points.isNotEmpty) {
+      final d = distanceBetween(_points.last, end);
+      if (d >= 1) {
+        _distanceM += d;
+        _points.add(end);
+        _writes = _writes.then((_) => store.append(end));
+      }
+    }
+    _lastGood = null;
     _state = RecState.stopped;
     notifyListeners(); // UI flips at once; disk work follows
     await _writes;

@@ -1,8 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../core/geo.dart';
+import '../../services/app_settings.dart';
 import '../../services/location_service.dart';
 import '../../services/recorder.dart';
 import 'trail_map.dart';
@@ -13,10 +15,12 @@ class RecordScreen extends StatefulWidget {
     super.key,
     required this.recorder,
     this.location,
+    this.settings,
     this.showTiles = true,
   });
 
   final Recorder recorder;
+  final AppSettings? settings;
   final bool showTiles;
 
   /// Null in widget tests: permissions are skipped.
@@ -77,6 +81,75 @@ class _RecordScreenState extends State<RecordScreen> {
     await rec.start();
   }
 
+  Future<void> _shareLog() async {
+    final files = await rec.store.latestFiles();
+    if (files.isEmpty) return;
+    await SharePlus.instance.share(ShareParams(
+      files: [for (final f in files) XFile(f.path)],
+      text: 'Backtrack GPS log',
+    ));
+  }
+
+  Future<void> _openSettings() async {
+    final s = widget.settings!;
+    final recording = rec.state == RecState.recording ||
+        rec.state == RecState.waitingForFix;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => ListenableBuilder(
+        listenable: s,
+        builder: (c, _) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Text('GPS mode',
+                      style:
+                          TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+                ),
+                if (recording)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    child: Text('Stop recording to change the GPS mode.'),
+                  ),
+                RadioGroup<GpsMode>(
+                  groupValue: s.gpsMode,
+                  onChanged: (m) {
+                    if (!recording && m != null) s.setGpsMode(m);
+                  },
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      RadioListTile<GpsMode>(
+                        value: GpsMode.satellites,
+                        enabled: !recording,
+                        title: const Text('Satellites only'),
+                        subtitle: const Text(
+                            'Pure GPS. Same as in a forest with no signal.'),
+                      ),
+                      RadioListTile<GpsMode>(
+                        value: GpsMode.fused,
+                        enabled: !recording,
+                        title: const Text('Google location'),
+                        subtitle: const Text(
+                            'GPS + phone motion sensors. Try both on the same walk.'),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _confirmStop() async {
     final ok = await showDialog<bool>(
       context: context,
@@ -123,7 +196,26 @@ class _RecordScreenState extends State<RecordScreen> {
     final alt = latest?.altitudeM ?? (pts.isEmpty ? null : pts.last.altitudeM);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Backtrack'), centerTitle: true),
+      appBar: AppBar(
+        title: const Text('Backtrack'),
+        centerTitle: true,
+        actions: [
+          if (rec.state == RecState.stopped)
+            IconButton(
+              key: const Key('share_log'),
+              tooltip: 'Share GPS log',
+              icon: const Icon(Icons.ios_share),
+              onPressed: _shareLog,
+            ),
+          if (widget.settings != null)
+            IconButton(
+              key: const Key('settings'),
+              tooltip: 'GPS mode',
+              icon: const Icon(Icons.tune),
+              onPressed: _openSettings,
+            ),
+        ],
+      ),
       body: SafeArea(
         child: Column(
           children: [

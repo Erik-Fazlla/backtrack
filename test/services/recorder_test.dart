@@ -44,6 +44,28 @@ void main() {
     await rec.idle();
   }
 
+  test('stop keeps the last metres walked (closes the loop)', () async {
+    await rec.start();
+    gps.add(p(37.98000, sec: 0));
+    gps.add(p(37.98003, sec: 3)); // ~3.3 m: under 5 m spacing, not saved
+    await pump();
+    expect(rec.points.length, 1);
+    await rec.stop();
+    expect(rec.points.length, 2);
+    expect(rec.points.last.lat, 37.98003);
+    expect(rec.distanceM, closeTo(3.3, 0.2));
+    final stored = await TrackStore(dir).loadLatest();
+    expect(stored!.points.length, 2);
+  });
+
+  test('stop does not add a point when nothing moved', () async {
+    await rec.start();
+    gps.add(p(37.98000, sec: 0));
+    await pump();
+    await rec.stop();
+    expect(rec.points.length, 1);
+  });
+
   test('starts idle', () {
     expect(rec.state, RecState.idle);
     expect(rec.points, isEmpty);
