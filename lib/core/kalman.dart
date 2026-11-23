@@ -39,6 +39,8 @@ class PositionSmoother {
       lon: _lon!,
       accuracyM: raw.accuracyM,
       altitudeM: raw.altitudeM,
+      speedMps: raw.speedMps,
+      headingDeg: raw.headingDeg,
       time: raw.time,
     );
   }

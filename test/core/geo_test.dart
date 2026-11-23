@@ -62,4 +62,47 @@ void main() {
       expect(maxGap(pts), closeTo(222.4, 1));
     });
   });
+
+  group('extrapolate (smooth blue dot between fixes)', () {
+    TrackPoint moving({double? spd = 2, double? hdg = 0}) => TrackPoint(
+          lat: 37.98,
+          lon: 23.73,
+          accuracyM: 3,
+          speedMps: spd,
+          headingDeg: hdg,
+          time: DateTime.utc(2026),
+        );
+
+    test('walking north 2 m/s: 0.5 s later is 1 m north', () {
+      final e = extrapolate(moving(), const Duration(milliseconds: 500));
+      expect(distanceMeters(37.98, 23.73, e.lat, e.lon), closeTo(1, 0.01));
+      expect(e.lat, greaterThan(37.98));
+      expect(e.lon, closeTo(23.73, 1e-9));
+    });
+
+    test('heading 90 moves east', () {
+      final e = extrapolate(moving(hdg: 90), const Duration(seconds: 1));
+      expect(e.lon, greaterThan(23.73));
+      expect(e.lat, closeTo(37.98, 1e-9));
+    });
+
+    test('never runs ahead more than the max time', () {
+      final e = extrapolate(moving(), const Duration(seconds: 10));
+      expect(distanceMeters(37.98, 23.73, e.lat, e.lon), closeTo(3, 0.01));
+    });
+
+    test('standing still or unknown heading: stays put', () {
+      for (final p in [moving(spd: 0.2), moving(hdg: null), moving(spd: null)]) {
+        final e = extrapolate(p, const Duration(seconds: 1));
+        expect(e.lat, p.lat);
+        expect(e.lon, p.lon);
+      }
+    });
+
+    test('speed and heading survive json', () {
+      final p = TrackPoint.fromJson(moving(spd: 1.2, hdg: 45).toJson());
+      expect(p.speedMps, 1.2);
+      expect(p.headingDeg, 45);
+    });
+  });
 }

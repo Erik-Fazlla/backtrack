@@ -11,6 +11,7 @@ class TrackPoint {
     required this.time,
     this.altitudeM,
     this.speedMps,
+    this.headingDeg,
   });
 
   final double lat;
@@ -21,6 +22,9 @@ class TrackPoint {
   /// Doppler speed from the GPS chip. Much more reliable than position
   /// changes for telling "standing still" from "walking".
   final double? speedMps;
+
+  /// Direction of travel from the GPS chip, degrees clockwise from north.
+  final double? headingDeg;
   final DateTime time;
 
   Map<String, Object?> toJson() => {
@@ -29,6 +33,7 @@ class TrackPoint {
         'acc': accuracyM,
         'alt': altitudeM,
         if (speedMps != null) 'spd': speedMps,
+        if (headingDeg != null) 'hdg': headingDeg,
         't': time.toUtc().millisecondsSinceEpoch,
       };
 
@@ -38,6 +43,7 @@ class TrackPoint {
         accuracyM: (j['acc'] as num).toDouble(),
         altitudeM: (j['alt'] as num?)?.toDouble(),
         speedMps: (j['spd'] as num?)?.toDouble(),
+        headingDeg: (j['hdg'] as num?)?.toDouble(),
         time: DateTime.fromMillisecondsSinceEpoch(j['t'] as int, isUtc: true),
       );
 }
@@ -75,4 +81,32 @@ double maxGap(List<TrackPoint> pts) {
     gap = math.max(gap, distanceBetween(pts[i - 1], pts[i]));
   }
   return gap;
+}
+
+/// Where a moving person probably is [ahead] after fix [p] was taken:
+/// moves along the GPS heading at the GPS speed. Used only to draw the
+/// blue dot smoothly between the 1-per-second fixes; never saved.
+/// Returns [p] unchanged when standing still or heading/speed is unknown.
+TrackPoint extrapolate(TrackPoint p, Duration ahead,
+    {Duration max = const Duration(milliseconds: 1500),
+    double minSpeedMps = 0.5}) {
+  final v = p.speedMps;
+  final h = p.headingDeg;
+  if (v == null || h == null || v < minSpeedMps || ahead <= Duration.zero) {
+    return p;
+  }
+  final secs = (ahead > max ? max : ahead).inMilliseconds / 1000;
+  final d = v * secs;
+  final rad = h * math.pi / 180;
+  final north = d * math.cos(rad);
+  final east = d * math.sin(rad);
+  return TrackPoint(
+    lat: p.lat + north / 111195.0,
+    lon: p.lon + east / (111195.0 * math.cos(p.lat * math.pi / 180)),
+    accuracyM: p.accuracyM,
+    altitudeM: p.altitudeM,
+    speedMps: p.speedMps,
+    headingDeg: p.headingDeg,
+    time: p.time,
+  );
 }

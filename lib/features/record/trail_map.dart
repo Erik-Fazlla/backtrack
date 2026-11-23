@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
@@ -35,9 +36,56 @@ class TrailMap extends StatefulWidget {
   State<TrailMap> createState() => _TrailMapState();
 }
 
-class _TrailMapState extends State<TrailMap> {
+class _TrailMapState extends State<TrailMap>
+    with SingleTickerProviderStateMixin {
   final _map = MapController();
   bool _ready = false;
+
+  // Smooth motion: GPS gives one fix per second. Between fixes we move the
+  // dot along the GPS heading at the GPS speed (display only, never saved),
+  // so it glides instead of jumping 1-2 m every second.
+  late final Ticker _ticker = createTicker(_onTick);
+  TrackPoint? _shownFix;
+  DateTime _fixArrivedAt = DateTime.now();
+  TrackPoint? _display;
+  Duration _lastFrame = Duration.zero;
+
+  void _onTick(Duration elapsed) {
+    if (elapsed - _lastFrame < const Duration(milliseconds: 50)) return;
+    _lastFrame = elapsed;
+    final fix = widget.current;
+    if (fix == null || !widget.recording) return;
+    final d = extrapolate(fix, DateTime.now().difference(_fixArrivedAt));
+    if (_display != null &&
+        d.lat == _display!.lat &&
+        d.lon == _display!.lon) {
+      return; // standing still: no repaint
+    }
+    setState(() => _display = d);
+    if (_ready && _follow) _map.move(_ll(d), _map.camera.zoom);
+  }
+
+  void _syncTicker() {
+    if (widget.recording && !_ticker.isActive) {
+      _ticker.start();
+    } else if (!widget.recording && _ticker.isActive) {
+      _ticker.stop();
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _shownFix = widget.current;
+    _display = widget.current;
+    _syncTicker();
+  }
+
+  @override
+  void dispose() {
+    _ticker.dispose();
+    super.dispose();
+  }
 
   /// True while the camera follows the blue dot. Turns off when the
   /// user pans; the "locate" button turns it back on.
@@ -50,11 +98,17 @@ class _TrailMapState extends State<TrailMap> {
   @override
   void didUpdateWidget(TrailMap old) {
     super.didUpdateWidget(old);
+    if (!identical(widget.current, _shownFix)) {
+      _shownFix = widget.current;
+      _fixArrivedAt = DateTime.now();
+      _display = widget.current;
+    }
+    _syncTicker();
     if (!_ready) return;
     if (old.recording && !widget.recording) {
       _fitTrail();
-    } else if (widget.recording && _follow && widget.current != null) {
-      _map.move(_ll(widget.current!), _map.camera.zoom);
+    } else if (widget.recording && _follow && _display != null) {
+      _map.move(_ll(_display!), _map.camera.zoom);
     }
   }
 
@@ -81,7 +135,7 @@ class _TrailMapState extends State<TrailMap> {
   @override
   Widget build(BuildContext context) {
     final pts = widget.points.map(_ll).toList();
-    final me = widget.current;
+    final me = widget.recording ? (_display ?? widget.current) : widget.current;
     // Draw the live tail from the last saved point to the blue dot so the
     // line keeps up with you between saved points.
     final line = [

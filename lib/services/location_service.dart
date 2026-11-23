@@ -82,6 +82,7 @@ class LocationService {
         accuracyM: pos.accuracy,
         altitudeM: pos.altitude == 0 ? null : pos.altitude,
         speedMps: pos.speed,
+        headingDeg: pos.heading,
         time: pos.timestamp.toUtc(),
       ),
     );
