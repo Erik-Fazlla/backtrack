@@ -21,6 +21,9 @@ Future<void> main() async {
   // transparent (no white strip under the app). Widgets keep their content
   // clear of the bars via SafeArea / NavigationBar insets.
   await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  // Portrait only: one-handed use on a trail; in landscape the map had no
+  // room left next to the stats and buttons.
+  await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
     systemNavigationBarColor: Colors.transparent,

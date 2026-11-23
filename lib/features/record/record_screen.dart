@@ -439,6 +439,7 @@ class _RecordScreenState extends State<RecordScreen> {
                           label: const Text('Take me back'),
                           style: FilledButton.styleFrom(
                             backgroundColor: const Color(0xFF1E6FE8),
+                            foregroundColor: Colors.white,
                             textStyle: const TextStyle(
                                 fontSize: 17, fontWeight: FontWeight.w600),
                           ),
