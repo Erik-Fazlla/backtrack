@@ -12,6 +12,7 @@ import '../journeys/format.dart';
 import '../journeys/save_journey_sheet.dart';
 import '../../core/map_region.dart';
 import '../../services/app_settings.dart';
+import '../../services/display_trail.dart';
 import '../../services/location_service.dart';
 import '../../services/offline_maps.dart';
 import '../../services/recorder.dart';
@@ -53,6 +54,9 @@ class _RecordScreenState extends State<RecordScreen> {
   void initState() {
     super.initState();
     rec.addListener(_changed);
+    widget.settings?.addListener(_reshape);
+    _lastState = rec.state;
+    _reshape();
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (rec.state == RecState.recording) setState(() {});
     });
@@ -66,7 +70,28 @@ class _RecordScreenState extends State<RecordScreen> {
     if (mounted) setState(() => _batteryOk = ok);
   }
 
+  /// Stopped trail as drawn (snapped when that setting is on).
+  List<TrackPoint>? _shownStopped;
+  RecState? _lastState;
+
+  Future<void> _reshape() async {
+    final svc = widget.services;
+    if (svc == null || rec.state != RecState.stopped) {
+      if (_shownStopped != null) setState(() => _shownStopped = null);
+      return;
+    }
+    final pts = rec.points;
+    final shown = await displayTrail(svc, pts);
+    if (mounted && rec.state == RecState.stopped) {
+      setState(() => _shownStopped = shown);
+    }
+  }
+
   void _changed() {
+    if (rec.state != _lastState) {
+      _lastState = rec.state;
+      _reshape();
+    }
     final p = rec.latest;
     // Switch to the offline map region you are in (cheap when unchanged).
     if (p != null) widget.maps?.useFor(p.lat, p.lon);
@@ -76,6 +101,7 @@ class _RecordScreenState extends State<RecordScreen> {
   @override
   void dispose() {
     rec.removeListener(_changed);
+    widget.settings?.removeListener(_reshape);
     _ticker?.cancel();
     super.dispose();
   }
@@ -181,6 +207,16 @@ class _RecordScreenState extends State<RecordScreen> {
                     selected: {s.mapStyle},
                     onSelectionChanged: (v) => s.setMapStyle(v.first),
                   ),
+                ),
+                SwitchListTile(
+                  key: const Key('snap_to_paths'),
+                  value: s.snapToPaths,
+                  onChanged: s.setSnapToPaths,
+                  title: const Text('Snap trail to paths'),
+                  subtitle: const Text(
+                      'Draw saved trails on nearby streets and footpaths from '
+                      'the offline map. Where you went off-path the trail is '
+                      'shown as recorded. Display only.'),
                 ),
                 if (widget.maps != null) ...[
                   const Divider(),
@@ -360,7 +396,7 @@ class _RecordScreenState extends State<RecordScreen> {
                         ]),
                         builder: (context, _) => TrailMap(
                           key: const Key('trail'),
-                          points: pts,
+                          points: _shownStopped ?? pts,
                           current: current,
                           recording: rec.state == RecState.recording ||
                               rec.state == RecState.waitingForFix,

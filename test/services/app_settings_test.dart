@@ -33,6 +33,17 @@ void main() {
     expect(again.gpsMode, GpsMode.fused);
   });
 
+  test('snap to paths defaults off and persists', () async {
+    final f = File('${dir.path}/settings.json');
+    final s = AppSettings(f);
+    await s.load();
+    expect(s.snapToPaths, isFalse);
+    await s.setSnapToPaths(true);
+    final again = AppSettings(f);
+    await again.load();
+    expect(again.snapToPaths, isTrue);
+  });
+
   test('corrupt file falls back to defaults', () async {
     final f = File('${dir.path}/settings.json')..writeAsStringSync('{oops');
     final s = AppSettings(f);

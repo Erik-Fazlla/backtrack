@@ -11,6 +11,7 @@ import '../../core/kalman.dart';
 import '../../core/point_filter.dart';
 import '../../core/trail_guide.dart';
 import '../../services/app_settings.dart';
+import '../../services/display_trail.dart';
 import '../journeys/format.dart';
 import '../map/base_map.dart';
 
@@ -56,9 +57,16 @@ class _FollowScreenState extends State<FollowScreen> {
   bool _follow = true;
   bool _arrived = false;
 
+  /// Drawn line (snapped when that setting is on). Guidance always uses
+  /// the recorded trail.
+  late List<TrackPoint> _shown = widget.trail;
+
   @override
   void initState() {
     super.initState();
+    displayTrail(widget.services, widget.trail).then((s) {
+      if (mounted) setState(() => _shown = s);
+    });
     final src = widget.positions ??
         () => widget.services.location?.positions(
                 fused: widget.services.settings?.gpsMode == GpsMode.fused) ??
@@ -110,7 +118,7 @@ class _FollowScreenState extends State<FollowScreen> {
   Widget build(BuildContext context) {
     final maps = widget.services.maps;
     final settings = widget.services.settings;
-    final trail = widget.trail.map(toLatLng).toList();
+    final trail = _shown.map(toLatLng).toList();
     final cs = Theme.of(context).colorScheme;
 
     return Scaffold(

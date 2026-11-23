@@ -5,6 +5,7 @@ import '../../app_services.dart';
 import '../../core/elevation.dart';
 import '../../core/geo.dart';
 import '../../services/app_settings.dart';
+import '../../services/display_trail.dart';
 import '../../services/journey_repo.dart';
 import '../follow/follow_screen.dart';
 import '../map/base_map.dart';
@@ -31,10 +32,25 @@ class _JourneyDetailScreenState extends State<JourneyDetailScreen> {
   List<Category> _cats = const [];
   List<TrackPoint> _pts = const [];
 
+  /// What the map draws: snapped to paths when that setting is on.
+  List<TrackPoint> _shown = const [];
+
   @override
   void initState() {
     super.initState();
+    widget.services.settings?.addListener(_reshape);
     _load();
+  }
+
+  @override
+  void dispose() {
+    widget.services.settings?.removeListener(_reshape);
+    super.dispose();
+  }
+
+  Future<void> _reshape() async {
+    final shown = await displayTrail(widget.services, _pts);
+    if (mounted) setState(() => _shown = shown);
   }
 
   Future<void> _load() async {
@@ -47,7 +63,9 @@ class _JourneyDetailScreenState extends State<JourneyDetailScreen> {
       _cats = cats;
       _cat = cats.where((c) => c.id == j?.categoryId).firstOrNull;
       _pts = pts;
+      _shown = pts;
     });
+    await _reshape();
   }
 
   Future<void> _edit() async {
@@ -115,7 +133,7 @@ class _JourneyDetailScreenState extends State<JourneyDetailScreen> {
     final t = Theme.of(context).textTheme;
     final maps = widget.services.maps;
     final settings = widget.services.settings;
-    final line = _pts.map(toLatLng).toList();
+    final line = (_shown.length >= 2 ? _shown : _pts).map(toLatLng).toList();
 
     return Scaffold(
       appBar: AppBar(

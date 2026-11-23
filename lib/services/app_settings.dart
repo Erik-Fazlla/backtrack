@@ -25,6 +25,10 @@ class AppSettings extends ChangeNotifier {
   MapStyle _mapStyle = MapStyle.light;
   MapStyle get mapStyle => _mapStyle;
 
+  /// Show trails pulled onto nearby mapped paths (display only).
+  bool _snapToPaths = false;
+  bool get snapToPaths => _snapToPaths;
+
   Future<void> load() async {
     try {
       if (!await file.exists()) return;
@@ -37,6 +41,7 @@ class AppSettings extends ChangeNotifier {
         (m) => m.name == j['mapStyle'],
         orElse: () => MapStyle.light,
       );
+      _snapToPaths = j['snapToPaths'] == true;
     } on FormatException {
       // corrupt file: keep defaults
     }
@@ -54,11 +59,21 @@ class AppSettings extends ChangeNotifier {
     await _save();
   }
 
+  Future<void> setSnapToPaths(bool v) async {
+    if (v == _snapToPaths) return;
+    _snapToPaths = v;
+    await _save();
+  }
+
   Future<void> _save() async {
     notifyListeners();
     await file.parent.create(recursive: true);
     await file.writeAsString(
-        jsonEncode({'gpsMode': _gpsMode.name, 'mapStyle': _mapStyle.name}),
+        jsonEncode({
+          'gpsMode': _gpsMode.name,
+          'mapStyle': _mapStyle.name,
+          'snapToPaths': _snapToPaths,
+        }),
         flush: true);
   }
 }
