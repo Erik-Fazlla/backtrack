@@ -139,92 +139,60 @@ class _RecordScreenState extends State<RecordScreen> {
 
   Future<void> _openSettings() async {
     final s = widget.settings!;
-    final recording = rec.state == RecState.recording ||
-        rec.state == RecState.waitingForFix;
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
-      builder: (c) => ListenableBuilder(
-        listenable: s,
-        builder: (c, _) => SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(8, 0, 8, 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
-                  child: Text('GPS mode',
-                      style:
-                          TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+      // Scrollable and allowed to grow: the content is taller than half
+      // the screen (it overflowed before).
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (c) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.7,
+        minChildSize: 0.4,
+        maxChildSize: 0.95,
+        builder: (c, scroll) => ListenableBuilder(
+          listenable: s,
+          builder: (c, _) => ListView(
+            controller: scroll,
+            padding: EdgeInsets.fromLTRB(
+                8, 0, 8, 24 + MediaQuery.paddingOf(c).bottom),
+            children: [
+              const _SheetTitle('Map style'),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: SegmentedButton<MapStyle>(
+                  segments: const [
+                    ButtonSegment(
+                        value: MapStyle.light,
+                        icon: Icon(Icons.light_mode),
+                        label: Text('Light')),
+                    ButtonSegment(
+                        value: MapStyle.dark,
+                        icon: Icon(Icons.dark_mode),
+                        label: Text('Dark')),
+                  ],
+                  selected: {s.mapStyle},
+                  onSelectionChanged: (v) => s.setMapStyle(v.first),
                 ),
-                if (recording)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16),
-                    child: Text('Stop recording to change the GPS mode.'),
-                  ),
-                RadioGroup<GpsMode>(
-                  groupValue: s.gpsMode,
-                  onChanged: (m) {
-                    if (!recording && m != null) s.setGpsMode(m);
-                  },
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      RadioListTile<GpsMode>(
-                        value: GpsMode.satellites,
-                        enabled: !recording,
-                        title: const Text('Satellites only'),
-                        subtitle: const Text(
-                            'Pure GPS. Same as in a forest with no signal.'),
-                      ),
-                      RadioListTile<GpsMode>(
-                        value: GpsMode.fused,
-                        enabled: !recording,
-                        title: const Text('Google location'),
-                        subtitle: const Text(
-                            'GPS + phone motion sensors. Try both on the same walk.'),
-                      ),
-                    ],
-                  ),
-                ),
+              ),
+              const SizedBox(height: 8),
+              SwitchListTile(
+                key: const Key('snap_to_paths'),
+                value: s.snapToPaths,
+                onChanged: s.setSnapToPaths,
+                title: const Text('Snap trail to paths'),
+                subtitle: const Text(
+                    'Draw saved trails on nearby streets and footpaths from '
+                    'the offline map. Off-path stretches stay as recorded. '
+                    'Display only.'),
+              ),
+              if (widget.maps != null) ...[
                 const Divider(),
-                const _SheetTitle('Map style'),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: SegmentedButton<MapStyle>(
-                    segments: const [
-                      ButtonSegment(
-                          value: MapStyle.light,
-                          icon: Icon(Icons.light_mode),
-                          label: Text('Light')),
-                      ButtonSegment(
-                          value: MapStyle.dark,
-                          icon: Icon(Icons.dark_mode),
-                          label: Text('Dark')),
-                    ],
-                    selected: {s.mapStyle},
-                    onSelectionChanged: (v) => s.setMapStyle(v.first),
-                  ),
-                ),
-                SwitchListTile(
-                  key: const Key('snap_to_paths'),
-                  value: s.snapToPaths,
-                  onChanged: s.setSnapToPaths,
-                  title: const Text('Snap trail to paths'),
-                  subtitle: const Text(
-                      'Draw saved trails on nearby streets and footpaths from '
-                      'the offline map. Where you went off-path the trail is '
-                      'shown as recorded. Display only.'),
-                ),
-                if (widget.maps != null) ...[
-                  const Divider(),
-                  const _SheetTitle('Offline maps'),
-                  _OfflineMapsSection(maps: widget.maps!),
-                ],
+                const _SheetTitle('Offline maps'),
+                _OfflineMapsSection(maps: widget.maps!),
               ],
-            ),
+            ],
           ),
         ),
       ),
@@ -344,7 +312,7 @@ class _RecordScreenState extends State<RecordScreen> {
           if (widget.settings != null)
             IconButton(
               key: const Key('settings'),
-              tooltip: 'GPS mode',
+              tooltip: 'Settings',
               icon: const Icon(Icons.tune),
               onPressed: _openSettings,
             ),

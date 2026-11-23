@@ -68,8 +68,8 @@ class _FollowScreenState extends State<FollowScreen> {
       if (mounted) setState(() => _shown = s);
     });
     final src = widget.positions ??
-        () => widget.services.location?.positions(
-                fused: widget.services.settings?.gpsMode == GpsMode.fused) ??
+        () =>
+            widget.services.location?.positions() ??
             const Stream<TrackPoint>.empty();
     _sub = src().listen(_onFix);
   }

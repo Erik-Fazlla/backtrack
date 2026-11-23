@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'app_services.dart';
@@ -16,6 +17,17 @@ import 'services/track_store.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Edge-to-edge: draw behind the status and navigation bars, which stay
+  // transparent (no white strip under the app). Widgets keep their content
+  // clear of the bars via SafeArea / NavigationBar insets.
+  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    systemNavigationBarColor: Colors.transparent,
+    systemNavigationBarDividerColor: Colors.transparent,
+    systemNavigationBarContrastEnforced: false,
+    systemStatusBarContrastEnforced: false,
+  ));
   // App-specific external storage (Android/data/<app>/files): private to the
   // app on the phone, but reachable from the PC (Android Studio Device
   // Explorer / adb) for GPS logs, maps and database backups.
@@ -29,10 +41,11 @@ Future<void> main() async {
   final location = LocationService();
   final recorder = Recorder(
     store: TrackStore(Directory('${base.path}/sessions')),
-    positions: () =>
-        location.positions(fused: settings.gpsMode == GpsMode.fused),
+    // Satellites only: on real walks Google/fused location reported ~0 m/s
+    // while walking and was no more accurate (see docs/SPEC.md).
+    positions: location.positions,
     sessionMeta: () => {
-      'gpsMode': settings.gpsMode.name,
+      'gpsMode': 'satellites',
       'app': 'backtrack-v0.1',
     },
   );

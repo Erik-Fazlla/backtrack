@@ -8,29 +8,12 @@ void main() {
   setUp(() => dir = Directory.systemTemp.createTempSync('bt_settings'));
   tearDown(() => dir.deleteSync(recursive: true));
 
-  test('defaults to satellites-only GPS', () async {
-    final s = AppSettings(File('${dir.path}/settings.json'));
-    await s.load();
-    expect(s.gpsMode, GpsMode.satellites);
-  });
-
-  test('gps mode persists across restarts', () async {
+  test('map style persists across restarts', () async {
     final f = File('${dir.path}/settings.json');
-    await AppSettings(f).setGpsMode(GpsMode.fused);
-    final again = AppSettings(f);
-    await again.load();
-    expect(again.gpsMode, GpsMode.fused);
-  });
-
-  test('map style persists and does not reset gps mode', () async {
-    final f = File('${dir.path}/settings.json');
-    final s = AppSettings(f);
-    await s.setGpsMode(GpsMode.fused);
-    await s.setMapStyle(MapStyle.dark);
+    await AppSettings(f).setMapStyle(MapStyle.dark);
     final again = AppSettings(f);
     await again.load();
     expect(again.mapStyle, MapStyle.dark);
-    expect(again.gpsMode, GpsMode.fused);
   });
 
   test('snap to paths defaults off and persists', () async {
@@ -48,6 +31,7 @@ void main() {
     final f = File('${dir.path}/settings.json')..writeAsStringSync('{oops');
     final s = AppSettings(f);
     await s.load();
-    expect(s.gpsMode, GpsMode.satellites);
+    expect(s.mapStyle, MapStyle.light);
+    expect(s.snapToPaths, isFalse);
   });
 }
