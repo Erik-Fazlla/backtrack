@@ -41,6 +41,8 @@ class OfflineMaps extends ChangeNotifier {
     }
     found.sort((a, b) => a.name.compareTo(b.name));
     _regions = found;
+    debugPrint('[maps] scan ${dir.path}: '
+        '${found.map((r) => '${r.name} z${r.maxZoom} ${r.sizeLabel}').toList()}');
     if (_active != null && !found.any((r) => r.path == _active!.path)) {
       _active = null;
       _provider = null;
@@ -85,8 +87,10 @@ class OfflineMaps extends ChangeNotifier {
     if (pick == null) return;
     try {
       _provider = await PmTilesVectorTileProvider.fromSource(pick.path);
+      debugPrint('[maps] active ${pick.name} for $lat,$lon (provider ready)');
     } catch (e) {
       _error = 'Could not open map ${pick.name}: $e';
+      debugPrint('[maps] ERROR $_error');
     }
     notifyListeners();
   }

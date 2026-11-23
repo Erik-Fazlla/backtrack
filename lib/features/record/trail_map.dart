@@ -112,6 +112,7 @@ class _TrailMapState extends State<TrailMap>
   bool _follow = true;
 
   static const _athens = LatLng(37.9838, 23.7275);
+  static const double _maxMapZoom = 19;
 
   LatLng _ll(TrackPoint p) => LatLng(p.lat, p.lon);
 
@@ -174,7 +175,7 @@ class _TrailMapState extends State<TrailMap>
           options: MapOptions(
             initialCenter: initial,
             initialZoom: me != null || start != null ? 17 : 12,
-            maxZoom: 19,
+            maxZoom: _maxMapZoom,
             backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
             interactionOptions: const InteractionOptions(
               flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
@@ -194,7 +195,13 @@ class _TrailMapState extends State<TrailMap>
                 tileProviders:
                     TileProviders({'protomaps': widget.offlineTiles!}),
                 theme: _themeFor(widget.style),
-                maximumZoom: widget.offlineMaxZoom.toDouble(),
+                // Highest zoom the map may show (not the file's detail
+                // level); the file's z15 data is over-zoomed for closer views.
+                maximumZoom: _maxMapZoom,
+                // Draw vectors directly. The default raster mode renders
+                // tiles to images and showed nothing on the test phone
+                // (Xiaomi, Mali GPU, Impeller) with no error.
+                layerMode: VectorTileLayerMode.vector,
               )
             else if (widget.showTiles)
               TileLayer(
