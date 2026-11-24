@@ -105,7 +105,7 @@ flutter:
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
 
-# App icon: neon breadcrumb trail on black (tools/make_icon.py).
+# App icon: Higgsfield artwork (assets/icon/source.png) prepared by tools/prepare_icon.py.
 # Regenerate with: dart run flutter_launcher_icons
 flutter_launcher_icons:
   android: true
@@ -113,4 +113,4 @@ flutter_launcher_icons:
   image_path: "assets/icon/icon.png"
   adaptive_icon_background: "#000000"
   adaptive_icon_foreground: "assets/icon/icon_fg.png"
-  adaptive_icon_monochrome: "assets/icon/icon_fg.png"
+  adaptive_icon_monochrome: "assets/icon/icon_mono.png"
