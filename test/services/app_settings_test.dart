@@ -27,6 +27,20 @@ void main() {
     expect(again.snapToPaths, isTrue);
   });
 
+  test('turn-with-me and full map persist (default off)', () async {
+    final f = File('${dir.path}/settings.json');
+    final s = AppSettings(f);
+    await s.load();
+    expect(s.turnWithMe, isFalse);
+    expect(s.fullMap, isFalse);
+    await s.setTurnWithMe(true);
+    await s.setFullMap(true);
+    final again = AppSettings(f);
+    await again.load();
+    expect(again.turnWithMe, isTrue);
+    expect(again.fullMap, isTrue);
+  });
+
   test('corrupt file falls back to defaults', () async {
     final f = File('${dir.path}/settings.json')..writeAsStringSync('{oops');
     final s = AppSettings(f);

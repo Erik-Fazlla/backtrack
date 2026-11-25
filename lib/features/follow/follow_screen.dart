@@ -14,6 +14,8 @@ import '../../services/app_settings.dart';
 import '../../services/display_trail.dart';
 import '../journeys/format.dart';
 import '../map/base_map.dart';
+import '../map/heading_beam.dart';
+import '../map/map_compass.dart';
 
 /// Follow a trail back to its start (or on to its end): your live position
 /// on the trail, an arrow along the path, distance left, progress, and a
@@ -67,7 +69,8 @@ class _FollowScreenState extends State<FollowScreen> {
     displayTrail(widget.services, widget.trail).then((s) {
       if (mounted) setState(() => _shown = s);
     });
-    final src = widget.positions ??
+    final src =
+        widget.positions ??
         () =>
             widget.services.location?.positions() ??
             const Stream<TrackPoint>.empty();
@@ -89,7 +92,8 @@ class _FollowScreenState extends State<FollowScreen> {
     if (off && !wasOff) _buzz(long: true);
     if (!off && wasOff) _buzz(long: false);
     final target = _towardStart ? widget.trail.first : widget.trail.last;
-    final arrived = distanceBetween(me, target) < 15 &&
+    final arrived =
+        distanceBetween(me, target) < 15 &&
         _guide.remainingM(pos, towardStart: _towardStart) < 25;
     if (arrived && !_arrived) _buzz(long: false);
     setState(() {
@@ -106,8 +110,7 @@ class _FollowScreenState extends State<FollowScreen> {
   Future<void> _buzz({required bool long}) async {
     try {
       if (await Vibration.hasVibrator()) {
-        await Vibration.vibrate(
-            pattern: long ? [0, 600, 200, 600] : [0, 150]);
+        await Vibration.vibrate(pattern: long ? [0, 600, 200, 600] : [0, 150]);
       }
     } catch (_) {
       // no vibrator: banner still shows
@@ -116,129 +119,229 @@ class _FollowScreenState extends State<FollowScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final settings = widget.services.settings;
+    return ListenableBuilder(
+      listenable: Listenable.merge([?settings, ?widget.services.heading]),
+      builder: (context, _) => _layout(context),
+    );
+  }
+
+  Widget _panel() => _GuidancePanel(
+    guide: _guide,
+    me: _me,
+    pos: _pos,
+    towardStart: _towardStart,
+    arrived: _arrived,
+    compassDeg: widget.services.heading?.heading,
+    onFlip: (v) => setState(() {
+      _towardStart = v;
+      _arrived = false;
+    }),
+  );
+
+  Widget _layout(BuildContext context) {
+    final settings = widget.services.settings;
+    final full = settings?.fullMap ?? false;
+    final cs = Theme.of(context).colorScheme;
+    final top = MediaQuery.paddingOf(context).top;
+    final toggle = settings == null
+        ? const SizedBox.shrink()
+        : Material(
+            color: cs.surface.withValues(alpha: 0.92),
+            shape: const CircleBorder(),
+            elevation: 3,
+            child: IconButton(
+              tooltip: full ? 'Exit full screen' : 'Full-screen map',
+              icon: Icon(full ? Icons.close_fullscreen : Icons.open_in_full),
+              onPressed: () => settings.setFullMap(!full),
+            ),
+          );
+    if (!full) {
+      return Scaffold(
+        appBar: AppBar(title: Text(widget.title)),
+        body: Column(
+          children: [
+            Expanded(
+              child: Stack(
+                children: [
+                  Positioned.fill(child: _mapArea(context, topInset: 12)),
+                  Positioned(
+                    right: 12,
+                    top: _offTrail ? 84 : 12,
+                    child: toggle,
+                  ),
+                ],
+              ),
+            ),
+            _panel(),
+          ],
+        ),
+      );
+    }
+    return Scaffold(
+      body: Stack(
+        children: [
+          Positioned.fill(child: _mapArea(context, topInset: top + 8)),
+          Positioned(
+            left: 8,
+            top: top + 4,
+            child: Material(
+              color: cs.surface.withValues(alpha: 0.92),
+              shape: const CircleBorder(),
+              elevation: 3,
+              child: const BackButton(),
+            ),
+          ),
+          Positioned(right: 12, top: top + (_offTrail ? 80 : 8), child: toggle),
+          Positioned(
+            left: 12,
+            right: 12,
+            bottom: 12,
+            child: Material(
+              color: cs.surface.withValues(alpha: 0.95),
+              borderRadius: BorderRadius.circular(20),
+              elevation: 4,
+              clipBehavior: Clip.antiAlias,
+              child: _panel(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _mapArea(BuildContext context, {required double topInset}) {
     final maps = widget.services.maps;
     final settings = widget.services.settings;
     final trail = _shown.map(toLatLng).toList();
     final cs = Theme.of(context).colorScheme;
-
-    return Scaffold(
-      appBar: AppBar(title: Text(widget.title)),
-      body: Column(
-        children: [
-          Expanded(
-            child: Stack(
-              children: [
-                ListenableBuilder(
-                  listenable: Listenable.merge(
-                      [?maps, ?settings]),
-                  builder: (context, _) => FlutterMap(
-                    mapController: _map,
-                    options: MapOptions(
-                      initialCameraFit: CameraFit.bounds(
-                        bounds: LatLngBounds.fromPoints(trail),
-                        padding: const EdgeInsets.all(48),
-                        maxZoom: 18,
-                      ),
-                      maxZoom: maxMapZoom,
-                      backgroundColor: cs.surfaceContainerLow,
-                      interactionOptions: const InteractionOptions(
-                        flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
-                      ),
-                      onPositionChanged: (camera, hasGesture) {
-                        if (hasGesture && _follow) {
-                          setState(() => _follow = false);
-                        }
-                      },
-                    ),
-                    children: [
-                      ...baseMapLayers(
-                        offlineTiles: maps?.provider,
-                        style: settings?.mapStyle ?? MapStyle.light,
-                        showTiles: widget.services.showTiles,
-                      ),
-                      PolylineLayer(polylines: [
-                        Polyline(
-                            points: trail, color: Colors.white, strokeWidth: 9),
-                        Polyline(
-                            points: trail, color: widget.color, strokeWidth: 6),
-                      ]),
-                      MarkerLayer(markers: [
-                        Marker(
-                          point: trail.first,
-                          width: 26,
-                          height: 26,
-                          child: const MapDot(
-                              color: Color(0xFF2E9E4F), icon: Icons.flag),
-                        ),
-                        Marker(
-                          point: trail.last,
-                          width: 26,
-                          height: 26,
-                          child: const MapDot(
-                              color: Color(0xFF34495E), icon: Icons.sports_score),
-                        ),
-                        if (_me != null)
-                          Marker(
-                            point: toLatLng(_me!),
-                            width: 22,
-                            height: 22,
-                            child: const MapDot(color: Color(0xFF1E6FE8)),
-                          ),
-                      ]),
-                      if (widget.services.showTiles || maps?.provider != null)
-                        mapAttribution(),
-                    ],
-                  ),
-                ),
-                if (_offTrail)
-                  Positioned(
-                    left: 12,
-                    right: 12,
-                    top: 12,
-                    child: Material(
-                      key: const Key('off_trail_banner'),
-                      color: cs.error,
-                      borderRadius: BorderRadius.circular(14),
-                      child: Padding(
-                        padding: const EdgeInsets.all(14),
-                        child: Text(
-                          'Off trail: ${_pos!.offTrailM.toStringAsFixed(0)} m '
-                          'away. Follow the arrow back to the line.',
-                          style: TextStyle(
-                              color: cs.onError, fontWeight: FontWeight.w600),
-                        ),
+    return Stack(
+      children: [
+        ListenableBuilder(
+          listenable: Listenable.merge([?maps, ?settings]),
+          builder: (context, _) => FlutterMap(
+            mapController: _map,
+            options: MapOptions(
+              initialCameraFit: CameraFit.bounds(
+                bounds: LatLngBounds.fromPoints(trail),
+                padding: const EdgeInsets.all(48),
+                maxZoom: 18,
+              ),
+              maxZoom: maxMapZoom,
+              backgroundColor: cs.surfaceContainerLow,
+              interactionOptions: const InteractionOptions(
+                flags: InteractiveFlag.all,
+              ),
+              onPositionChanged: (camera, hasGesture) {
+                if (hasGesture && _follow) {
+                  setState(() => _follow = false);
+                }
+              },
+            ),
+            children: [
+              ...baseMapLayers(
+                offlineTiles: maps?.provider,
+                style: settings?.mapStyle ?? MapStyle.light,
+                showTiles: widget.services.showTiles,
+              ),
+              PolylineLayer(
+                polylines: [
+                  Polyline(points: trail, color: Colors.white, strokeWidth: 9),
+                  Polyline(points: trail, color: widget.color, strokeWidth: 6),
+                ],
+              ),
+              if (_me != null && widget.services.heading?.heading != null)
+                MarkerLayer(
+                  markers: [
+                    Marker(
+                      point: toLatLng(_me!),
+                      width: 140,
+                      height: 140,
+                      child: HeadingBeam(
+                        headingDeg: widget.services.heading!.heading!,
+                        accuracyDeg: widget.services.heading!.accuracyDeg,
                       ),
                     ),
+                  ],
+                ),
+              MarkerLayer(
+                markers: [
+                  Marker(
+                    point: trail.first,
+                    width: 26,
+                    height: 26,
+                    child: const MapDot(
+                      color: Color(0xFF2E9E4F),
+                      icon: Icons.flag,
+                    ),
                   ),
-                Positioned(
-                  right: 12,
-                  bottom: 12,
-                  child: FloatingActionButton.small(
-                    heroTag: 'follow_me',
-                    onPressed: () {
-                      setState(() => _follow = true);
-                      if (_me != null) _map.move(toLatLng(_me!), 17);
-                    },
-                    child: Icon(
-                        _follow ? Icons.my_location : Icons.location_searching),
+                  Marker(
+                    point: trail.last,
+                    width: 26,
+                    height: 26,
+                    child: const MapDot(
+                      color: Color(0xFF34495E),
+                      icon: Icons.sports_score,
+                    ),
+                  ),
+                  if (_me != null)
+                    Marker(
+                      point: toLatLng(_me!),
+                      width: 22,
+                      height: 22,
+                      child: const MapDot(color: Color(0xFF1E6FE8)),
+                    ),
+                ],
+              ),
+              if (widget.services.showTiles || maps?.provider != null)
+                mapAttribution(),
+            ],
+          ),
+        ),
+        if (_offTrail)
+          Positioned(
+            left: 12,
+            right: 12,
+            top: topInset,
+            child: Material(
+              key: const Key('off_trail_banner'),
+              color: cs.error,
+              borderRadius: BorderRadius.circular(14),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Text(
+                  'Off trail: ${_pos!.offTrailM.toStringAsFixed(0)} m '
+                  'away. Follow the arrow back to the line.',
+                  style: TextStyle(
+                    color: cs.onError,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-              ],
+              ),
             ),
           ),
-          _GuidancePanel(
-            guide: _guide,
-            me: _me,
-            pos: _pos,
-            towardStart: _towardStart,
-            arrived: _arrived,
-            onFlip: (v) => setState(() {
-              _towardStart = v;
-              _arrived = false;
-            }),
+        Positioned(
+          right: 12,
+          top: topInset + (_offTrail ? 72 : 0) + 56,
+          child: MapCompass(
+            map: _map,
+            heading: widget.services.heading,
+            turnWithMeEnabled: settings?.turnWithMe ?? false,
           ),
-        ],
-      ),
+        ),
+        Positioned(
+          right: 12,
+          bottom: (settings?.fullMap ?? false) ? 220 : 12,
+          child: FloatingActionButton.small(
+            heroTag: 'follow_me',
+            onPressed: () {
+              setState(() => _follow = true);
+              if (_me != null) _map.move(toLatLng(_me!), 17);
+            },
+            child: Icon(_follow ? Icons.my_location : Icons.location_searching),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -251,7 +354,11 @@ class _GuidancePanel extends StatelessWidget {
     required this.towardStart,
     required this.arrived,
     required this.onFlip,
+    this.compassDeg,
   });
+
+  /// Where the top of the phone points (compass), if available.
+  final double? compassDeg;
 
   final TrailGuide guide;
   final TrackPoint? me;
@@ -285,10 +392,10 @@ class _GuidancePanel extends StatelessWidget {
       final aim = guide.aimPoint(pos, towardStart: towardStart);
       final bearing = bearingDeg(me, aim);
       final moving = (me.speedMps ?? 0) >= 0.5 && me.headingDeg != null;
-      // Moving: arrow relative to where you walk. Still: map is north-up,
-      // so show the compass direction.
-      final angle =
-          moving ? relativeAngle(bearing, me.headingDeg!) : bearing;
+      // Best: compass = where you face, works standing still. Else GPS
+      // walking direction. Else plain compass bearing (north up).
+      final facing = compassDeg ?? (moving ? me.headingDeg : null);
+      final angle = facing != null ? relativeAngle(bearing, facing) : bearing;
       final remaining = guide.remainingM(pos, towardStart: towardStart);
       final target = towardStart ? guide.trail.first : guide.trail.last;
       final straight = distanceBetween(me, target);
@@ -299,20 +406,30 @@ class _GuidancePanel extends StatelessWidget {
           children: [
             Transform.rotate(
               angle: angle * math.pi / 180,
-              child: const Icon(Icons.navigation,
-                  key: Key('guide_arrow'), size: 64, color: Color(0xFF1E6FE8)),
+              child: const Icon(
+                Icons.navigation,
+                key: Key('guide_arrow'),
+                size: 64,
+                color: Color(0xFF1E6FE8),
+              ),
             ),
             const SizedBox(width: 16),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('${formatDistance(remaining)} along the trail',
-                      key: const Key('remaining'),
-                      style: t.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
+                  Text(
+                    '${formatDistance(remaining)} along the trail',
+                    key: const Key('remaining'),
+                    style: t.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                  ),
                   Text(
                     '${formatDistance(straight)} straight line · '
-                    '${moving ? 'arrow = your walking direction' : 'arrow = compass, north up'}',
+                    '${compassDeg != null
+                        ? 'arrow = turn this way'
+                        : moving
+                        ? 'arrow = your walking direction'
+                        : 'arrow = compass, north up'}',
                     style: t.bodySmall,
                   ),
                   const SizedBox(height: 8),
@@ -322,9 +439,11 @@ class _GuidancePanel extends StatelessWidget {
                     borderRadius: BorderRadius.circular(3),
                   ),
                   const SizedBox(height: 4),
-                  Text('${(pct * 100).clamp(0, 100).toStringAsFixed(0)}% of the way '
-                      '${towardStart ? 'back' : 'to the end'}',
-                      style: t.labelSmall),
+                  Text(
+                    '${(pct * 100).clamp(0, 100).toStringAsFixed(0)}% of the way '
+                    '${towardStart ? 'back' : 'to the end'}',
+                    style: t.labelSmall,
+                  ),
                 ],
               ),
             ),
@@ -344,11 +463,15 @@ class _GuidancePanel extends StatelessWidget {
             child: SegmentedButton<bool>(
               segments: const [
                 ButtonSegment(
-                    value: true, icon: Icon(Icons.flag), label: Text('To start')),
+                  value: true,
+                  icon: Icon(Icons.flag),
+                  label: Text('To start'),
+                ),
                 ButtonSegment(
-                    value: false,
-                    icon: Icon(Icons.sports_score),
-                    label: Text('To end')),
+                  value: false,
+                  icon: Icon(Icons.sports_score),
+                  label: Text('To end'),
+                ),
               ],
               selected: {towardStart},
               onSelectionChanged: (v) => onFlip(v.first),

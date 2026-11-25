@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import 'services/app_settings.dart';
 import 'services/gps_monitor.dart';
+import 'services/heading_service.dart';
 import 'services/journey_repo.dart';
 import 'services/location_service.dart';
 import 'services/offline_maps.dart';
@@ -16,6 +17,7 @@ class AppServices {
     this.settings,
     this.maps,
     this.gps,
+    this.heading,
     this.showTiles = true,
   });
 
@@ -29,6 +31,9 @@ class AppServices {
 
   /// GPS warm-up before Record (null in tests).
   final GpsMonitor? gps;
+
+  /// Compass direction for the beam / follow arrow (null in tests).
+  final HeadingService? heading;
 
   /// False in widget tests (no network).
   final bool showTiles;

@@ -10,6 +10,7 @@ import 'features/journeys/library_screen.dart';
 import 'features/record/record_screen.dart';
 import 'services/app_settings.dart';
 import 'services/gps_monitor.dart';
+import 'services/heading_service.dart';
 import 'services/journey_repo.dart';
 import 'services/location_service.dart';
 import 'services/offline_maps.dart';
@@ -25,17 +26,20 @@ Future<void> main() async {
   // Portrait only: one-handed use on a trail; in landscape the map had no
   // room left next to the stats and buttons.
   await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-    statusBarColor: Colors.transparent,
-    systemNavigationBarColor: Colors.transparent,
-    systemNavigationBarDividerColor: Colors.transparent,
-    systemNavigationBarContrastEnforced: false,
-    systemStatusBarContrastEnforced: false,
-  ));
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      systemNavigationBarColor: Colors.transparent,
+      systemNavigationBarDividerColor: Colors.transparent,
+      systemNavigationBarContrastEnforced: false,
+      systemStatusBarContrastEnforced: false,
+    ),
+  );
   // App-specific external storage (Android/data/<app>/files): private to the
   // app on the phone, but reachable from the PC (Android Studio Device
   // Explorer / adb) for GPS logs, maps and database backups.
-  final base = await getExternalStorageDirectory() ??
+  final base =
+      await getExternalStorageDirectory() ??
       await getApplicationDocumentsDirectory();
   final settings = AppSettings(File('${base.path}/settings.json'));
   await settings.load();
@@ -48,26 +52,25 @@ Future<void> main() async {
     // Android's fused location (what geolocator uses on Android 12+; the
     // same source as Strava).
     positions: location.positions,
-    sessionMeta: () => {
-      'gpsMode': 'fused',
-      'app': 'backtrack-v0.1',
-    },
+    sessionMeta: () => {'gpsMode': 'fused', 'app': 'backtrack-v0.1'},
   );
   // If the app was killed mid-recording, pick the trail back up.
   await recorder.restore();
   final last = recorder.points.isEmpty ? null : recorder.points.last;
   await maps.useFor(last?.lat, last?.lon);
-  runApp(BacktrackApp(
-    services: AppServices(
-      recorder: recorder,
-      repo: repo,
-      location: location,
-      settings: settings,
-      maps: maps,
-      gps: GpsMonitor(
-          positions: () => location.positions(background: false)),
+  runApp(
+    BacktrackApp(
+      services: AppServices(
+        recorder: recorder,
+        repo: repo,
+        location: location,
+        settings: settings,
+        maps: maps,
+        gps: GpsMonitor(positions: () => location.positions(background: false)),
+        heading: HeadingService(),
+      ),
     ),
-  ));
+  );
 }
 
 class BacktrackApp extends StatelessWidget {
@@ -82,9 +85,10 @@ class BacktrackApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(colorSchemeSeed: seed, useMaterial3: true),
       darkTheme: ThemeData(
-          colorSchemeSeed: seed,
-          brightness: Brightness.dark,
-          useMaterial3: true),
+        colorSchemeSeed: seed,
+        brightness: Brightness.dark,
+        useMaterial3: true,
+      ),
       home: AppShell(services: services),
     );
   }
@@ -109,6 +113,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     widget.services.recorder.addListener(_syncGps);
+    widget.services.settings?.addListener(_onSettings);
     _syncGps();
   }
 
@@ -116,8 +121,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     widget.services.recorder.removeListener(_syncGps);
+    widget.services.settings?.removeListener(_onSettings);
     super.dispose();
   }
+
+  void _onSettings() => setState(() {});
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -128,11 +136,17 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// GPS warm-up runs while the app is open and not recording. During a
   /// recording the recorder owns the GPS (and keeps it on in background).
   void _syncGps() {
+    // Compass only while the app is on screen (beam, arrow, turn-with-me).
+    final heading = widget.services.heading;
+    if (_foreground) {
+      heading?.start();
+    } else {
+      heading?.stop();
+    }
     final gps = widget.services.gps;
     if (gps == null) return;
     final st = widget.services.recorder.state;
-    final recording =
-        st == RecState.recording || st == RecState.waitingForFix;
+    final recording = st == RecState.recording || st == RecState.waitingForFix;
     if (_foreground && !recording) {
       gps.start();
     } else {
@@ -159,24 +173,30 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           JourneysMapScreen(services: s),
         ],
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _tab,
-        onDestinationSelected: (i) => setState(() => _tab = i),
-        destinations: const [
-          NavigationDestination(
-              icon: Icon(Icons.fiber_manual_record_outlined),
-              selectedIcon: Icon(Icons.fiber_manual_record),
-              label: 'Record'),
-          NavigationDestination(
-              icon: Icon(Icons.list_alt_outlined),
-              selectedIcon: Icon(Icons.list_alt),
-              label: 'Library'),
-          NavigationDestination(
-              icon: Icon(Icons.map_outlined),
-              selectedIcon: Icon(Icons.map),
-              label: 'Map'),
-        ],
-      ),
+      // Full-screen map on the Record tab hides the tab bar.
+      bottomNavigationBar: (_tab == 0 && (s.settings?.fullMap ?? false))
+          ? null
+          : NavigationBar(
+              selectedIndex: _tab,
+              onDestinationSelected: (i) => setState(() => _tab = i),
+              destinations: const [
+                NavigationDestination(
+                  icon: Icon(Icons.fiber_manual_record_outlined),
+                  selectedIcon: Icon(Icons.fiber_manual_record),
+                  label: 'Record',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.list_alt_outlined),
+                  selectedIcon: Icon(Icons.list_alt),
+                  label: 'Library',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.map_outlined),
+                  selectedIcon: Icon(Icons.map),
+                  label: 'Map',
+                ),
+              ],
+            ),
     );
   }
 }

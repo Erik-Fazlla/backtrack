@@ -18,6 +18,14 @@ class AppSettings extends ChangeNotifier {
   bool _snapToPaths = false;
   bool get snapToPaths => _snapToPaths;
 
+  /// Offer the "turn the map with me" mode on the compass button.
+  bool _turnWithMe = false;
+  bool get turnWithMe => _turnWithMe;
+
+  /// Record screen shows the map full screen.
+  bool _fullMap = false;
+  bool get fullMap => _fullMap;
+
   Future<void> load() async {
     try {
       if (!await file.exists()) return;
@@ -27,6 +35,8 @@ class AppSettings extends ChangeNotifier {
         orElse: () => MapStyle.light,
       );
       _snapToPaths = j['snapToPaths'] == true;
+      _turnWithMe = j['turnWithMe'] == true;
+      _fullMap = j['fullMap'] == true;
     } on FormatException {
       // corrupt file: keep defaults
     }
@@ -44,6 +54,18 @@ class AppSettings extends ChangeNotifier {
     await _save();
   }
 
+  Future<void> setTurnWithMe(bool v) async {
+    if (v == _turnWithMe) return;
+    _turnWithMe = v;
+    await _save();
+  }
+
+  Future<void> setFullMap(bool v) async {
+    if (v == _fullMap) return;
+    _fullMap = v;
+    await _save();
+  }
+
   Future<void> _save() async {
     notifyListeners();
     await file.parent.create(recursive: true);
@@ -51,6 +73,8 @@ class AppSettings extends ChangeNotifier {
         jsonEncode({
           'mapStyle': _mapStyle.name,
           'snapToPaths': _snapToPaths,
+          'turnWithMe': _turnWithMe,
+          'fullMap': _fullMap,
         }),
         flush: true);
   }

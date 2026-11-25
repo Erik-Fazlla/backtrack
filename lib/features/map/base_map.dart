@@ -31,7 +31,9 @@ List<Widget> baseMapLayers({
     [
       if (offlineTiles != null)
         VectorTileLayer(
-          key: ValueKey(offlineTiles),
+          // Key includes the style: a style change must rebuild the layer,
+          // or already-drawn tiles keep the old look until restart.
+          key: ValueKey((offlineTiles, style)),
           tileProviders: TileProviders({'protomaps': offlineTiles}),
           theme: _themeFor(style),
           maximumZoom: maxMapZoom,

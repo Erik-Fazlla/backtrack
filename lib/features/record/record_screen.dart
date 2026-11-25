@@ -56,7 +56,7 @@ class _RecordScreenState extends State<RecordScreen> {
   void initState() {
     super.initState();
     rec.addListener(_changed);
-    widget.settings?.addListener(_reshape);
+    widget.settings?.addListener(_onSettings);
     _lastState = rec.state;
     _reshape();
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -89,6 +89,12 @@ class _RecordScreenState extends State<RecordScreen> {
     }
   }
 
+  /// Settings changed: full-screen toggle, snap, style...
+  void _onSettings() {
+    if (mounted) setState(() {});
+    _reshape();
+  }
+
   void _changed() {
     if (rec.state != _lastState) {
       _lastState = rec.state;
@@ -103,7 +109,7 @@ class _RecordScreenState extends State<RecordScreen> {
   @override
   void dispose() {
     rec.removeListener(_changed);
-    widget.settings?.removeListener(_reshape);
+    widget.settings?.removeListener(_onSettings);
     _ticker?.cancel();
     super.dispose();
   }
@@ -204,6 +210,16 @@ class _RecordScreenState extends State<RecordScreen> {
                   'Draw saved trails on nearby streets and footpaths from '
                   'the offline map. Off-path stretches stay as recorded. '
                   'Display only.',
+                ),
+              ),
+              SwitchListTile(
+                key: const Key('turn_with_me'),
+                value: s.turnWithMe,
+                onChanged: s.setTurnWithMe,
+                title: const Text('Turn-with-me map'),
+                subtitle: const Text(
+                  'Tap the compass button to make the map turn with the '
+                  'direction you face. Tap again for north up.',
                 ),
               ),
               if (widget.maps != null) ...[
@@ -315,64 +331,266 @@ class _RecordScreenState extends State<RecordScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final full = widget.settings?.fullMap ?? false;
+    return full ? _buildFull(context) : _buildNormal(context);
+  }
+
+  bool get _hasStoppedActions =>
+      rec.state == RecState.stopped &&
+      rec.points.length >= 2 &&
+      widget.services != null;
+
+  /// Live position for the dot: the recorder while recording, otherwise
+  /// the GPS warm-up (so you see where you are before pressing Record).
+  TrackPoint? get _current {
+    final recording =
+        rec.state == RecState.recording || rec.state == RecState.waitingForFix;
+    if (recording) {
+      return rec.latest ?? (rec.points.isEmpty ? null : rec.points.last);
+    }
+    final warm = widget.services?.gps?.recent;
+    return (warm == null || warm.isEmpty) ? null : warm.last;
+  }
+
+  /// The map with its overlays (GPS pill, hint, full-screen toggle).
+  Widget _mapStack(BuildContext context, {required bool full}) {
+    final cs = Theme.of(context).colorScheme;
+    final pts = rec.points;
+    final topInset = full ? MediaQuery.paddingOf(context).top + 8 : 12.0;
+    final svc = widget.services;
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: ListenableBuilder(
+            listenable: Listenable.merge([
+              ?widget.maps,
+              ?widget.settings,
+              ?svc?.gps,
+            ]),
+            builder: (context, _) => TrailMap(
+              key: const Key('trail'),
+              points: _shownStopped ?? pts,
+              current: _current,
+              recording:
+                  rec.state == RecState.recording ||
+                  rec.state == RecState.waitingForFix,
+              showTiles: widget.showTiles,
+              offlineTiles: widget.maps?.provider,
+              offlineMaxZoom: widget.maps?.active?.maxZoom ?? 15,
+              style: widget.settings?.mapStyle ?? MapStyle.light,
+              heading: svc?.heading,
+              turnWithMeEnabled: widget.settings?.turnWithMe ?? false,
+              controlsTop: topInset + 52,
+              controlsBottom: full ? 12 : 12,
+            ),
+          ),
+        ),
+        // Full-screen toggle, top right.
+        if (widget.settings != null)
+          Positioned(
+            right: 12,
+            top: topInset,
+            child: _RoundButton(
+              key: const Key('full_map_toggle'),
+              icon: full ? Icons.close_fullscreen : Icons.open_in_full,
+              tooltip: full ? 'Exit full screen' : 'Full-screen map',
+              onTap: () => widget.settings!.setFullMap(!full),
+            ),
+          ),
+        if (svc?.gps != null &&
+            (rec.state == RecState.idle || rec.state == RecState.stopped))
+          Positioned(
+            left: 12,
+            top: topInset + (pts.isEmpty ? 80 : 0),
+            child: ListenableBuilder(
+              listenable: svc!.gps!,
+              builder: (context, _) => _GpsPill(
+                gps: svc.gps!,
+                onOpenSettings: () => widget.location?.openLocationSettings(),
+              ),
+            ),
+          ),
+        if (pts.isEmpty)
+          Positioned(
+            left: 12,
+            right: 64,
+            top: topInset,
+            child: Material(
+              color: cs.surface.withValues(alpha: 0.92),
+              borderRadius: BorderRadius.circular(14),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Text(
+                  switch (rec.state) {
+                    RecState.waitingForFix =>
+                      'Getting an accurate position… '
+                          '${rec.warmupProgress}/${rec.warmupRequired}\n'
+                          'Stand still under open sky.',
+                    _ =>
+                      'Stand at your start until GPS is green,\n'
+                          'then press Record. No signal needed.',
+                  },
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// Take me back / Save and the main Record / Stop button.
+  Widget _actions(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (_hasStoppedActions)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: SizedBox(
+                    height: 56,
+                    child: FilledButton.icon(
+                      key: const Key('take_me_back'),
+                      onPressed: _takeMeBack,
+                      icon: const Icon(Icons.u_turn_left),
+                      label: const Text('Take me back'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF1E6FE8),
+                        foregroundColor: Colors.white,
+                        textStyle: const TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: SizedBox(
+                    height: 56,
+                    child: FilledButton.tonalIcon(
+                      key: const Key('save_journey'),
+                      onPressed: _savedId == null ? _save : null,
+                      icon: Icon(
+                        _savedId == null
+                            ? Icons.bookmark_add_outlined
+                            : Icons.check,
+                      ),
+                      label: Text(_savedId == null ? 'Save' : 'Saved'),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        SizedBox(
+          width: double.infinity,
+          height: _hasStoppedActions ? 48 : 64,
+          child: switch (rec.state) {
+            RecState.idle || RecState.stopped => FilledButton.icon(
+              key: const Key('record'),
+              onPressed: _start,
+              icon: const Icon(Icons.fiber_manual_record),
+              label: Text(
+                rec.state == RecState.stopped ? 'New recording' : 'Record',
+              ),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFFF6B00),
+                textStyle: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            _ => FilledButton.icon(
+              key: const Key('stop'),
+              onPressed: _confirmStop,
+              icon: const Icon(Icons.stop),
+              label: const Text('Stop'),
+              style: FilledButton.styleFrom(
+                backgroundColor: cs.inverseSurface,
+                textStyle: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          },
+        ),
+      ],
+    );
+  }
+
+  List<Widget> _banners(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return [
+      if (!_batteryOk)
+        MaterialBanner(
+          content: const Text(
+            'Battery optimisation may stop recording when the screen is off.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                await widget.location?.requestIgnoreBatteryOptimization();
+                await _checkBattery();
+              },
+              child: const Text('Allow'),
+            ),
+          ],
+        ),
+      if (_problem != null)
+        MaterialBanner(
+          backgroundColor: cs.errorContainer,
+          content: Text(_problem!),
+          actions: [
+            TextButton(
+              onPressed: () => widget.location?.openAppSettings(),
+              child: const Text('Settings'),
+            ),
+          ],
+        ),
+    ];
+  }
+
+  List<Widget> _appBarActions() => [
+    if (rec.state == RecState.stopped)
+      IconButton(
+        key: const Key('share_log'),
+        tooltip: 'Share GPS log',
+        icon: const Icon(Icons.ios_share),
+        onPressed: _shareLog,
+      ),
+    if (widget.settings != null)
+      IconButton(
+        key: const Key('settings'),
+        tooltip: 'Settings',
+        icon: const Icon(Icons.tune),
+        onPressed: _openSettings,
+      ),
+  ];
+
+  Widget _buildNormal(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final pts = rec.points;
     final latest = rec.latest;
-    final current = rec.state == RecState.stopped
-        ? null
-        : latest ?? (pts.isEmpty ? null : pts.last);
     final alt = latest?.altitudeM ?? (pts.isEmpty ? null : pts.last.altitudeM);
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Backtrack'),
         centerTitle: true,
-        actions: [
-          if (rec.state == RecState.stopped)
-            IconButton(
-              key: const Key('share_log'),
-              tooltip: 'Share GPS log',
-              icon: const Icon(Icons.ios_share),
-              onPressed: _shareLog,
-            ),
-          if (widget.settings != null)
-            IconButton(
-              key: const Key('settings'),
-              tooltip: 'Settings',
-              icon: const Icon(Icons.tune),
-              onPressed: _openSettings,
-            ),
-        ],
+        actions: _appBarActions(),
       ),
       body: SafeArea(
         child: Column(
           children: [
-            if (!_batteryOk)
-              MaterialBanner(
-                content: const Text(
-                  'Battery optimisation may stop recording when the screen is off.',
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () async {
-                      await widget.location?.requestIgnoreBatteryOptimization();
-                      await _checkBattery();
-                    },
-                    child: const Text('Allow'),
-                  ),
-                ],
-              ),
-            if (_problem != null)
-              MaterialBanner(
-                backgroundColor: cs.errorContainer,
-                content: Text(_problem!),
-                actions: [
-                  TextButton(
-                    onPressed: () => widget.location?.openAppSettings(),
-                    child: const Text('Settings'),
-                  ),
-                ],
-              ),
+            ..._banners(context),
             Expanded(
               child: Container(
                 margin: const EdgeInsets.all(12),
@@ -381,70 +599,7 @@ class _RecordScreenState extends State<RecordScreen> {
                   borderRadius: BorderRadius.circular(20),
                 ),
                 clipBehavior: Clip.antiAlias,
-                child: Stack(
-                  children: [
-                    Positioned.fill(
-                      child: ListenableBuilder(
-                        listenable: Listenable.merge([
-                          if (widget.maps != null) widget.maps!,
-                          if (widget.settings != null) widget.settings!,
-                        ]),
-                        builder: (context, _) => TrailMap(
-                          key: const Key('trail'),
-                          points: _shownStopped ?? pts,
-                          current: current,
-                          recording:
-                              rec.state == RecState.recording ||
-                              rec.state == RecState.waitingForFix,
-                          showTiles: widget.showTiles,
-                          offlineTiles: widget.maps?.provider,
-                          offlineMaxZoom: widget.maps?.active?.maxZoom ?? 15,
-                          style: widget.settings?.mapStyle ?? MapStyle.light,
-                        ),
-                      ),
-                    ),
-                    if (widget.services?.gps != null &&
-                        (rec.state == RecState.idle ||
-                            rec.state == RecState.stopped))
-                      Positioned(
-                        left: 12,
-                        top: pts.isEmpty ? 92 : 12,
-                        child: ListenableBuilder(
-                          listenable: widget.services!.gps!,
-                          builder: (context, _) => _GpsPill(
-                            gps: widget.services!.gps!,
-                            onOpenSettings: () =>
-                                widget.location?.openLocationSettings(),
-                          ),
-                        ),
-                      ),
-                    if (pts.isEmpty)
-                      Positioned(
-                        left: 12,
-                        right: 12,
-                        top: 12,
-                        child: Material(
-                          color: cs.surface.withValues(alpha: 0.92),
-                          borderRadius: BorderRadius.circular(14),
-                          child: Padding(
-                            padding: const EdgeInsets.all(12),
-                            child: Text(
-                              switch (rec.state) {
-                                RecState.waitingForFix =>
-                                  'Getting an accurate position… '
-                                      '${rec.warmupProgress}/${rec.warmupRequired}\n'
-                                      'Stand still under open sky.',
-                                _ =>
-                                  'Stand at your start until GPS is green,\nthen press Record. No signal needed.',
-                              },
-                              textAlign: TextAlign.center,
-                              style: Theme.of(context).textTheme.titleSmall,
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
+                child: _mapStack(context, full: false),
               ),
             ),
             if (rec.state == RecState.recording && !rec.moving)
@@ -478,100 +633,125 @@ class _RecordScreenState extends State<RecordScreen> {
                   style: TextStyle(color: cs.error),
                 ),
               ),
-            if (rec.state == RecState.stopped &&
-                pts.length >= 2 &&
-                widget.services != null)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: SizedBox(
-                        height: 56,
-                        child: FilledButton.icon(
-                          key: const Key('take_me_back'),
-                          onPressed: _takeMeBack,
-                          icon: const Icon(Icons.u_turn_left),
-                          label: const Text('Take me back'),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: const Color(0xFF1E6FE8),
-                            foregroundColor: Colors.white,
-                            textStyle: const TextStyle(
-                              fontSize: 17,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: SizedBox(
-                        height: 56,
-                        child: OutlinedButton.icon(
-                          key: const Key('save_journey'),
-                          onPressed: _savedId == null ? _save : null,
-                          icon: Icon(
-                            _savedId == null
-                                ? Icons.bookmark_add_outlined
-                                : Icons.check,
-                          ),
-                          label: Text(_savedId == null ? 'Save' : 'Saved'),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-              child: SizedBox(
-                width: double.infinity,
-                height:
-                    rec.state == RecState.stopped &&
-                        pts.length >= 2 &&
-                        widget.services != null
-                    ? 48
-                    : 64,
-                child: switch (rec.state) {
-                  RecState.idle || RecState.stopped => FilledButton.icon(
-                    key: const Key('record'),
-                    onPressed: _start,
-                    icon: const Icon(Icons.fiber_manual_record),
-                    label: Text(
-                      rec.state == RecState.stopped
-                          ? 'New recording'
-                          : 'Record',
-                    ),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF6B00),
-                      textStyle: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  _ => FilledButton.icon(
-                    key: const Key('stop'),
-                    onPressed: _confirmStop,
-                    icon: const Icon(Icons.stop),
-                    label: const Text('Stop'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: cs.inverseSurface,
-                      textStyle: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                },
-              ),
+              child: _actions(context),
             ),
           ],
         ),
       ),
     );
   }
+
+  /// Map fills the whole screen; a compact stats card and the buttons
+  /// float on top of it.
+  Widget _buildFull(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final t = Theme.of(context).textTheme;
+    final pts = rec.points;
+    final alt =
+        rec.latest?.altitudeM ?? (pts.isEmpty ? null : pts.last.altitudeM);
+    final bottom = MediaQuery.paddingOf(context).bottom;
+    return Scaffold(
+      body: Stack(
+        children: [
+          Positioned.fill(child: _mapStack(context, full: true)),
+          // Share / settings, top left (pill sits below when shown).
+          Positioned(
+            left: 8,
+            top: MediaQuery.paddingOf(context).top + 4,
+            child: Row(
+              children: [
+                for (final a in _appBarActions())
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: Material(
+                      color: cs.surface.withValues(alpha: 0.92),
+                      shape: const CircleBorder(),
+                      child: a,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          Positioned(
+            left: 12,
+            right: 12,
+            bottom: bottom + 12,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ..._banners(context),
+                Material(
+                  key: const Key('full_stats'),
+                  color: cs.surface.withValues(alpha: 0.94),
+                  borderRadius: BorderRadius.circular(18),
+                  elevation: 4,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: Row(
+                      children: [
+                        for (final (label, value) in [
+                          ('Time', _duration()),
+                          ('Distance', _km(rec.distanceM)),
+                          (
+                            _slopeLabel(),
+                            alt == null ? '–' : '${alt.toStringAsFixed(0)} m',
+                          ),
+                        ])
+                          Expanded(
+                            child: Column(
+                              children: [
+                                Text(
+                                  value,
+                                  style: t.titleLarge?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                Text(label, style: t.bodySmall),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                _actions(context),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RoundButton extends StatelessWidget {
+  const _RoundButton({
+    super.key,
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+    message: tooltip,
+    child: Material(
+      color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.92),
+      shape: const CircleBorder(),
+      elevation: 3,
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: SizedBox(width: 44, height: 44, child: Icon(icon, size: 22)),
+      ),
+    ),
+  );
 }
 
 class _Stats extends StatelessWidget {

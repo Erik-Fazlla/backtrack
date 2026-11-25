@@ -6,7 +6,10 @@ import 'package:vector_map_tiles_pmtiles/vector_map_tiles_pmtiles.dart';
 
 import '../../core/geo.dart';
 import '../../services/app_settings.dart';
+import '../../services/heading_service.dart';
 import '../map/base_map.dart';
+import '../map/heading_beam.dart';
+import '../map/map_compass.dart';
 
 /// Real map with the trail drawn on top.
 ///
@@ -24,7 +27,19 @@ class TrailMap extends StatefulWidget {
     this.offlineTiles,
     this.offlineMaxZoom = 15,
     this.style = MapStyle.light,
+    this.heading,
+    this.turnWithMeEnabled = false,
+    this.controlsTop = 12,
+    this.controlsBottom = 12,
   });
+
+  /// Compass sensor: orange beam on the dot, turn-with-me.
+  final HeadingService? heading;
+  final bool turnWithMeEnabled;
+
+  /// Space to keep clear for overlays (full-screen mode).
+  final double controlsTop;
+  final double controlsBottom;
 
   /// Offline map for the current region, or null.
   final PmTilesVectorTileProvider? offlineTiles;
@@ -166,8 +181,9 @@ class _TrailMapState extends State<TrailMap>
             initialZoom: me != null || start != null ? 17 : 12,
             maxZoom: maxMapZoom,
             backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
+            // Two-finger twist rotates; the compass button turns it back.
             interactionOptions: const InteractionOptions(
-              flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+              flags: InteractiveFlag.all,
             ),
             onMapReady: () {
               _ready = true;
@@ -207,6 +223,25 @@ class _TrailMapState extends State<TrailMap>
                   strokeWidth: 5,
                 ),
               ]),
+            if (me != null && widget.heading != null)
+              ListenableBuilder(
+                listenable: widget.heading!,
+                builder: (context, _) {
+                  final h = widget.heading!.heading;
+                  if (h == null) return const SizedBox.shrink();
+                  return MarkerLayer(markers: [
+                    Marker(
+                      point: _ll(me),
+                      width: 140,
+                      height: 140,
+                      child: HeadingBeam(
+                        headingDeg: h,
+                        accuracyDeg: widget.heading!.accuracyDeg,
+                      ),
+                    ),
+                  ]);
+                },
+              ),
             MarkerLayer(markers: [
               if (start != null)
                 Marker(
@@ -215,7 +250,7 @@ class _TrailMapState extends State<TrailMap>
                   height: 22,
                   child: const _Dot(color: TrailMap.startColor),
                 ),
-              if (me != null && widget.recording)
+              if (me != null)
                 Marker(
                   point: _ll(me),
                   width: 22,
@@ -229,7 +264,16 @@ class _TrailMapState extends State<TrailMap>
         ),
         Positioned(
           right: 12,
-          bottom: 12,
+          top: widget.controlsTop,
+          child: MapCompass(
+            map: _map,
+            heading: widget.heading,
+            turnWithMeEnabled: widget.turnWithMeEnabled,
+          ),
+        ),
+        Positioned(
+          right: 12,
+          bottom: widget.controlsBottom,
           child: FloatingActionButton.small(
             heroTag: 'locate',
             onPressed: widget.recording ? _recenter : _fitTrail,

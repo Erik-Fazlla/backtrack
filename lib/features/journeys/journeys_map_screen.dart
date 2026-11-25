@@ -6,6 +6,7 @@ import '../../app_services.dart';
 import '../../services/app_settings.dart';
 import '../../services/journey_repo.dart';
 import '../map/base_map.dart';
+import '../map/map_compass.dart';
 import 'format.dart';
 import 'journey_detail_screen.dart';
 
@@ -156,7 +157,7 @@ class _JourneysMapScreenState extends State<JourneysMapScreen> {
                 backgroundColor:
                     Theme.of(context).colorScheme.surfaceContainerLow,
                 interactionOptions: const InteractionOptions(
-                  flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+                  flags: InteractiveFlag.all,
                 ),
                 onMapReady: _fitAll,
               ),
@@ -231,6 +232,15 @@ class _JourneysMapScreenState extends State<JourneysMapScreen> {
                 ),
               ),
             ),
+          Positioned(
+            right: 12,
+            top: 60,
+            child: MapCompass(
+              map: _map,
+              heading: widget.services.heading,
+              turnWithMeEnabled: false,
+            ),
+          ),
           Positioned(
             right: 12,
             bottom: 12,
