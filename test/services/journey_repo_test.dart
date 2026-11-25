@@ -93,6 +93,31 @@ void main() {
     expect((await repo.categories()).last.name, 'Ski');
   });
 
+  test('category can be renamed', () async {
+    final c = (await repo.categories()).first;
+    await repo.renameCategory(c.id, '  Trail run ');
+    expect((await repo.categories()).first.name, 'Trail run');
+  });
+
+  test('deleting a category moves its journeys to another one', () async {
+    final cats = await repo.categories();
+    final ski = await repo.addCategory('Ski', 0xFF00AAFF);
+    final id = await repo.save(name: 's', categoryId: ski, points: walk(100));
+    expect(await repo.journeyCount(ski), 1);
+    await repo.deleteCategory(ski, moveTo: cats.last.id);
+    expect((await repo.categories()).any((c) => c.id == ski), isFalse);
+    expect((await repo.journey(id))!.categoryId, cats.last.id);
+  });
+
+  test('the last category cannot be deleted', () async {
+    final cats = await repo.categories();
+    for (final c in cats.skip(1)) {
+      await repo.deleteCategory(c.id, moveTo: cats.first.id);
+    }
+    expect(() => repo.deleteCategory(cats.first.id, moveTo: cats.first.id),
+        throwsStateError);
+  });
+
   test('bounding box stored for fast map culling', () async {
     final cats = await repo.categories();
     final id = await repo.save(

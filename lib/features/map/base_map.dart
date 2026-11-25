@@ -52,6 +52,9 @@ List<Widget> baseMapLayers({
 
 Widget mapAttribution() => const RichAttributionWidget(
       alignment: AttributionAlignment.bottomLeft,
+      // Keep the (i) credit (OpenStreetMap's licence asks for it); drop the
+      // flutter_map library logo next to it.
+      showFlutterMapAttribution: false,
       attributions: [
         TextSourceAttribution('OpenStreetMap contributors'),
         TextSourceAttribution('Protomaps'),

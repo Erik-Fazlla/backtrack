@@ -150,6 +150,32 @@ class JourneyRepo {
       _db.update('categories', {'color': color},
           where: 'id = ?', whereArgs: [id]);
 
+  Future<void> renameCategory(int id, String name) =>
+      _db.update('categories', {'name': name.trim()},
+          where: 'id = ?', whereArgs: [id]);
+
+  Future<int> journeyCount(int categoryId) async =>
+      Sqflite.firstIntValue(await _db.rawQuery(
+          'SELECT COUNT(*) FROM journeys WHERE category_id = ?',
+          [categoryId])) ??
+      0;
+
+  /// Deletes a category; its journeys move to [moveTo]. At least one
+  /// category must remain.
+  Future<void> deleteCategory(int id, {required int moveTo}) async {
+    final n = Sqflite.firstIntValue(
+            await _db.rawQuery('SELECT COUNT(*) FROM categories')) ??
+        0;
+    if (n <= 1 || moveTo == id) {
+      throw StateError('Keep at least one category.');
+    }
+    await _db.transaction((tx) async {
+      await tx.update('journeys', {'category_id': moveTo},
+          where: 'category_id = ?', whereArgs: [id]);
+      await tx.delete('categories', where: 'id = ?', whereArgs: [id]);
+    });
+  }
+
   Future<int> save({
     required String name,
     required int categoryId,

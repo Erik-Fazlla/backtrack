@@ -2,11 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../../app_services.dart';
 import '../../services/journey_repo.dart';
+import 'category_editor.dart';
 import 'format.dart';
 import 'journey_detail_screen.dart';
 
 /// All saved journeys as a list: search, filter by category, sort.
-/// Long-press a category chip to change its colour.
+/// "+ New" adds a category; long-press a chip to rename, recolour or delete.
 class LibraryScreen extends StatefulWidget {
   const LibraryScreen({super.key, required this.services});
   final AppServices services;
@@ -50,34 +51,85 @@ class _LibraryScreenState extends State<LibraryScreen> {
     });
   }
 
-  Future<void> _pickColor(Category c) async {
-    final color = await showDialog<int>(
+  Future<void> _addCategory() async {
+    final r = await showCategoryEditor(context, all: _categories);
+    if (r == null) return;
+    await repo.addCategory(r.$1, r.$2);
+    widget.services.notifyJourneysChanged();
+  }
+
+  Future<void> _editCategory(Category c) async {
+    final r = await showCategoryEditor(context, existing: c, all: _categories);
+    if (r == null) return;
+    await repo.renameCategory(c.id, r.$1);
+    await repo.setCategoryColor(c.id, r.$2);
+    widget.services.notifyJourneysChanged();
+  }
+
+  Future<void> _deleteCategory(Category c) async {
+    final others = _categories.where((o) => o.id != c.id).toList();
+    if (others.isEmpty) return;
+    final target = others.firstWhere((o) => o.name == 'Other',
+        orElse: () => others.first);
+    final n = await repo.journeyCount(c.id);
+    if (!mounted) return;
+    final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('${c.name} colour'),
-        content: Wrap(
-          spacing: 10,
-          runSpacing: 10,
+        title: Text('Delete "${c.name}"?'),
+        content: Text(n == 0
+            ? 'No journeys use it.'
+            : '$n ${n == 1 ? 'journey moves' : 'journeys move'} to '
+                '"${target.name}". No journey is deleted.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              key: const Key('category_delete_confirm'),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await repo.deleteCategory(c.id, moveTo: target.id);
+    _cats.remove(c.id);
+    widget.services.notifyJourneysChanged();
+  }
+
+  Future<void> _manageCategory(Category c) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            for (final p in categoryPalette)
-              InkWell(
-                onTap: () => Navigator.pop(ctx, p),
-                customBorder: const CircleBorder(),
-                child: CircleAvatar(
-                  radius: 20,
-                  backgroundColor: colorOf(p),
-                  child: p == c.color
-                      ? const Icon(Icons.check, color: Colors.white)
-                      : null,
-                ),
+            ListTile(
+              leading: CircleAvatar(backgroundColor: colorOf(c.color)),
+              title: Text(c.name,
+                  style: Theme.of(ctx).textTheme.titleMedium),
+            ),
+            ListTile(
+              key: const Key('category_edit'),
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('Rename / colour'),
+              onTap: () => Navigator.pop(ctx, 'edit'),
+            ),
+            if (_categories.length > 1)
+              ListTile(
+                key: const Key('category_delete'),
+                leading: const Icon(Icons.delete_outline),
+                title: const Text('Delete category'),
+                onTap: () => Navigator.pop(ctx, 'delete'),
               ),
           ],
         ),
       ),
     );
-    if (color == null) return;
-    await repo.setCategoryColor(c.id, color);
-    widget.services.notifyJourneysChanged();
+    if (action == 'edit') await _editCategory(c);
+    if (action == 'delete') await _deleteCategory(c);
   }
 
   @override
@@ -138,7 +190,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 4),
                     child: GestureDetector(
-                      onLongPress: () => _pickColor(c),
+                      onLongPress: () => _manageCategory(c),
                       child: FilterChip(
                         key: Key('filter_${c.name}'),
                         avatar: CircleAvatar(backgroundColor: colorOf(c.color)),
@@ -151,6 +203,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       ),
                     ),
                   ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: ActionChip(
+                    key: const Key('add_category'),
+                    avatar: const Icon(Icons.add, size: 18),
+                    label: const Text('New'),
+                    onPressed: _addCategory,
+                  ),
+                ),
               ],
             ),
           ),
