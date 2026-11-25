@@ -9,6 +9,7 @@ import 'features/journeys/journeys_map_screen.dart';
 import 'features/journeys/library_screen.dart';
 import 'features/record/record_screen.dart';
 import 'services/app_settings.dart';
+import 'services/gps_monitor.dart';
 import 'services/journey_repo.dart';
 import 'services/location_service.dart';
 import 'services/offline_maps.dart';
@@ -44,11 +45,11 @@ Future<void> main() async {
   final location = LocationService();
   final recorder = Recorder(
     store: TrackStore(Directory('${base.path}/sessions')),
-    // Satellites only: on real walks Google/fused location reported ~0 m/s
-    // while walking and was no more accurate (see docs/SPEC.md).
+    // Android's fused location (what geolocator uses on Android 12+; the
+    // same source as Strava).
     positions: location.positions,
     sessionMeta: () => {
-      'gpsMode': 'satellites',
+      'gpsMode': 'fused',
       'app': 'backtrack-v0.1',
     },
   );
@@ -63,6 +64,8 @@ Future<void> main() async {
       location: location,
       settings: settings,
       maps: maps,
+      gps: GpsMonitor(
+          positions: () => location.positions(background: false)),
     ),
   ));
 }
@@ -97,8 +100,45 @@ class AppShell extends StatefulWidget {
   State<AppShell> createState() => _AppShellState();
 }
 
-class _AppShellState extends State<AppShell> {
+class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   int _tab = 0;
+  bool _foreground = true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    widget.services.recorder.addListener(_syncGps);
+    _syncGps();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    widget.services.recorder.removeListener(_syncGps);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _foreground = state == AppLifecycleState.resumed;
+    _syncGps();
+  }
+
+  /// GPS warm-up runs while the app is open and not recording. During a
+  /// recording the recorder owns the GPS (and keeps it on in background).
+  void _syncGps() {
+    final gps = widget.services.gps;
+    if (gps == null) return;
+    final st = widget.services.recorder.state;
+    final recording =
+        st == RecState.recording || st == RecState.waitingForFix;
+    if (_foreground && !recording) {
+      gps.start();
+    } else {
+      gps.stop();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

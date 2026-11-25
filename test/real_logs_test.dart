@@ -40,11 +40,14 @@ void main() {
     test('replay $name', () async {
       final raw = <TrackPoint>[];
       Map<String, Object?> meta = const {};
+      var preCount = 0;
       for (final line in log.readAsLinesSync()) {
         if (line.trim().isEmpty) continue;
         try {
           final j = jsonDecode(line) as Map<String, Object?>;
-          if (j.containsKey('meta')) {
+          if (j.containsKey('pre')) {
+            preCount++;
+          } else if (j.containsKey('meta')) {
             meta = (j['meta'] as Map).cast<String, Object?>();
           } else {
             raw.add(TrackPoint.fromJson(j));
@@ -76,7 +79,7 @@ void main() {
       final accs = raw.map((p) => p.accuracyM).toList()..sort();
       // ignore: avoid_print
       print([
-        '── $name  (gps: ${meta['gpsMode'] ?? '?'})',
+        '── $name  (gps: ${meta['gpsMode'] ?? '?'}, warm-up fixes before Record: $preCount)',
         'raw fixes: ${raw.length}  (moving $moving, accuracy median '
             '${accs.isEmpty ? '-' : accs[accs.length ~/ 2].toStringAsFixed(1)} m)',
         'raw path length: ${trailDistance(raw).toStringAsFixed(0)} m',

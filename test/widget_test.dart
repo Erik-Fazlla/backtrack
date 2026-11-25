@@ -46,7 +46,7 @@ void main() {
 
     await tester.pumpWidget(BacktrackApp(services: services));
     expect(find.byKey(const Key('record')), findsOneWidget);
-    expect(find.textContaining('Press Record'), findsOneWidget);
+    expect(find.textContaining('until GPS is green'), findsOneWidget);
 
     // --- record ---------------------------------------------------------
     await tester.runAsync(() async {

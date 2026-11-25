@@ -28,14 +28,20 @@ class TrackStore {
   }
 
   Future<void> startSession(DateTime start,
-      {Map<String, Object?>? meta}) async {
+      {Map<String, Object?>? meta,
+      List<TrackPoint> prelude = const []}) async {
     await dir.create(recursive: true);
     _current = File('${dir.path}/session_${_stamp(start)}.jsonl');
     _raw = File('${dir.path}/raw_${_stamp(start)}.jsonl');
     await _current!.writeAsString('', flush: true);
-    // First raw line says how it was recorded (e.g. which GPS mode).
-    await _raw!.writeAsString(
+    // First raw line says how it was recorded, then the warm-up fixes seen
+    // before Record (marked "pre" so replays skip them).
+    final head = StringBuffer(
         '${jsonEncode({'meta': meta ?? const <String, Object?>{}})}\n');
+    for (final p in prelude) {
+      head.write('${jsonEncode({'pre': p.toJson()})}\n');
+    }
+    await _raw!.writeAsString(head.toString());
   }
 
   /// Session + raw log files of the most recent recording (for sharing).

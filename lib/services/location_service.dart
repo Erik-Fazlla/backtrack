@@ -48,21 +48,27 @@ class LocationService {
   /// distanceFilter is 0 on purpose: we want a fix every second so the
   /// "you are here" dot moves smoothly. Recorder decides which fixes are
   /// saved to the trail (PointFilter.minSpacingM).
-  Stream<TrackPoint> positions({int distanceFilterM = 0, bool fused = false}) {
+  ///
+  /// [background]: run inside a foreground service with a notification so
+  /// it keeps going with the screen off (recording). False for the GPS
+  /// warm-up while the app is open: no notification, stops with the app.
+  Stream<TrackPoint> positions(
+      {int distanceFilterM = 0, bool fused = false, bool background = true}) {
     final LocationSettings settings = Platform.isAndroid
         ? AndroidSettings(
-            // Pure satellite GPS (LocationManager GPS_PROVIDER), not the
-            // fused provider. Fused mixes in Wi-Fi/cell positions, which in
-            // a city can be 20-50 m off while claiming good accuracy, and
-            // don't exist in a forest anyway. This is what the app will
-            // really have offline, so test with it too.
-            // fused=true: Google's provider (GPS + motion sensors), for A/B.
+            // NOTE: on Android 12+ geolocator's LocationManager path still
+            // picks Android's FUSED provider (seen in `dumpsys location` on
+            // the test phone, 2026-11-25), so positions are fused either way
+            // — the same source Strava uses. True raw-GPS would need a
+            // native GPS_PROVIDER channel (not done).
             forceLocationManager: !fused,
             accuracy: LocationAccuracy.best,
             distanceFilter: distanceFilterM,
             intervalDuration: const Duration(seconds: 1),
             useMSLAltitude: true,
-            foregroundNotificationConfig: const ForegroundNotificationConfig(
+            foregroundNotificationConfig: !background
+                ? null
+                : const ForegroundNotificationConfig(
               notificationTitle: 'Backtrack is recording',
               notificationText: 'Your trail is being saved, even offline.',
               notificationChannelName: 'Trail recording',

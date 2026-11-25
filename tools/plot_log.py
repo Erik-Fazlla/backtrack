@@ -29,6 +29,8 @@ def load(path):
             continue
         if "meta" in j:
             meta = j["meta"]
+        elif "pre" in j:
+            continue  # warm-up fix before Record
         elif "end" not in j:
             pts.append(j)
     return meta, pts

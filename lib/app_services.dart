@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import 'services/app_settings.dart';
+import 'services/gps_monitor.dart';
 import 'services/journey_repo.dart';
 import 'services/location_service.dart';
 import 'services/offline_maps.dart';
@@ -14,6 +15,7 @@ class AppServices {
     this.location,
     this.settings,
     this.maps,
+    this.gps,
     this.showTiles = true,
   });
 
@@ -24,6 +26,9 @@ class AppServices {
   final LocationService? location;
   final AppSettings? settings;
   final OfflineMaps? maps;
+
+  /// GPS warm-up before Record (null in tests).
+  final GpsMonitor? gps;
 
   /// False in widget tests (no network).
   final bool showTiles;

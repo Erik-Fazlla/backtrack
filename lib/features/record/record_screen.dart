@@ -7,12 +7,14 @@ import 'package:share_plus/share_plus.dart';
 import '../../app_services.dart';
 import '../../core/elevation.dart';
 import '../../core/geo.dart';
+import '../../core/gps_readiness.dart';
 import '../follow/follow_screen.dart';
 import '../journeys/format.dart';
 import '../journeys/save_journey_sheet.dart';
 import '../../core/map_region.dart';
 import '../../services/app_settings.dart';
 import '../../services/display_trail.dart';
+import '../../services/gps_monitor.dart';
 import '../../services/location_service.dart';
 import '../../services/offline_maps.dart';
 import '../../services/recorder.dart';
@@ -111,13 +113,15 @@ class _RecordScreenState extends State<RecordScreen> {
     if (loc != null) {
       final r = await loc.ensureReady();
       if (r != LocationReadiness.ready) {
-        setState(() => _problem = switch (r) {
-              LocationReadiness.serviceOff =>
-                'Location is turned off. Turn it on to record.',
-              LocationReadiness.deniedForever =>
-                'Location permission is blocked. Allow it in app settings.',
-              _ => 'Backtrack needs location permission to record.',
-            });
+        setState(
+          () => _problem = switch (r) {
+            LocationReadiness.serviceOff =>
+              'Location is turned off. Turn it on to record.',
+            LocationReadiness.deniedForever =>
+              'Location permission is blocked. Allow it in app settings.',
+            _ => 'Backtrack needs location permission to record.',
+          },
+        );
         return;
       }
     }
@@ -125,16 +129,24 @@ class _RecordScreenState extends State<RecordScreen> {
       _problem = null;
       _savedId = null;
     });
-    await rec.start();
+    // Hand over from the warm-up: if it was green the GPS has settled, so
+    // record from the first fix; its readings go into the GPS log.
+    final gps = widget.services?.gps;
+    final ready = gps?.signal == GpsSignal.ready;
+    final prelude = gps?.recent ?? const <TrackPoint>[];
+    await gps?.stop();
+    await rec.start(gpsReady: ready, prelude: prelude);
   }
 
   Future<void> _shareLog() async {
     final files = await rec.store.latestFiles();
     if (files.isEmpty) return;
-    await SharePlus.instance.share(ShareParams(
-      files: [for (final f in files) XFile(f.path)],
-      text: 'Backtrack GPS log',
-    ));
+    await SharePlus.instance.share(
+      ShareParams(
+        files: [for (final f in files) XFile(f.path)],
+        text: 'Backtrack GPS log',
+      ),
+    );
   }
 
   Future<void> _openSettings() async {
@@ -156,7 +168,11 @@ class _RecordScreenState extends State<RecordScreen> {
           builder: (c, _) => ListView(
             controller: scroll,
             padding: EdgeInsets.fromLTRB(
-                8, 0, 8, 24 + MediaQuery.paddingOf(c).bottom),
+              8,
+              0,
+              8,
+              24 + MediaQuery.paddingOf(c).bottom,
+            ),
             children: [
               const _SheetTitle('Map style'),
               Padding(
@@ -164,13 +180,15 @@ class _RecordScreenState extends State<RecordScreen> {
                 child: SegmentedButton<MapStyle>(
                   segments: const [
                     ButtonSegment(
-                        value: MapStyle.light,
-                        icon: Icon(Icons.light_mode),
-                        label: Text('Light')),
+                      value: MapStyle.light,
+                      icon: Icon(Icons.light_mode),
+                      label: Text('Light'),
+                    ),
                     ButtonSegment(
-                        value: MapStyle.dark,
-                        icon: Icon(Icons.dark_mode),
-                        label: Text('Dark')),
+                      value: MapStyle.dark,
+                      icon: Icon(Icons.dark_mode),
+                      label: Text('Dark'),
+                    ),
                   ],
                   selected: {s.mapStyle},
                   onSelectionChanged: (v) => s.setMapStyle(v.first),
@@ -183,9 +201,10 @@ class _RecordScreenState extends State<RecordScreen> {
                 onChanged: s.setSnapToPaths,
                 title: const Text('Snap trail to paths'),
                 subtitle: const Text(
-                    'Draw saved trails on nearby streets and footpaths from '
-                    'the offline map. Off-path stretches stay as recorded. '
-                    'Display only.'),
+                  'Draw saved trails on nearby streets and footpaths from '
+                  'the offline map. Off-path stretches stay as recorded. '
+                  'Display only.',
+                ),
               ),
               if (widget.maps != null) ...[
                 const Divider(),
@@ -222,7 +241,11 @@ class _RecordScreenState extends State<RecordScreen> {
     if (!mounted) return;
     setState(() => _savedId = id);
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Saved "${choice.name.isEmpty ? 'Journey' : choice.name}" to your Library.')),
+      SnackBar(
+        content: Text(
+          'Saved "${choice.name.isEmpty ? 'Journey' : choice.name}" to your Library.',
+        ),
+      ),
     );
   }
 
@@ -249,11 +272,13 @@ class _RecordScreenState extends State<RecordScreen> {
         content: const Text('The trail is kept so you can follow it back.'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('Keep recording')),
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Keep recording'),
+          ),
           FilledButton(
-              onPressed: () => Navigator.pop(c, true),
-              child: const Text('Stop')),
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Stop'),
+          ),
         ],
       ),
     );
@@ -284,8 +309,9 @@ class _RecordScreenState extends State<RecordScreen> {
     };
   }
 
-  String _km(double m) =>
-      m < 1000 ? '${m.toStringAsFixed(0)} m' : '${(m / 1000).toStringAsFixed(2)} km';
+  String _km(double m) => m < 1000
+      ? '${m.toStringAsFixed(0)} m'
+      : '${(m / 1000).toStringAsFixed(2)} km';
 
   @override
   Widget build(BuildContext context) {
@@ -324,7 +350,8 @@ class _RecordScreenState extends State<RecordScreen> {
             if (!_batteryOk)
               MaterialBanner(
                 content: const Text(
-                    'Battery optimisation may stop recording when the screen is off.'),
+                  'Battery optimisation may stop recording when the screen is off.',
+                ),
                 actions: [
                   TextButton(
                     onPressed: () async {
@@ -366,7 +393,8 @@ class _RecordScreenState extends State<RecordScreen> {
                           key: const Key('trail'),
                           points: _shownStopped ?? pts,
                           current: current,
-                          recording: rec.state == RecState.recording ||
+                          recording:
+                              rec.state == RecState.recording ||
                               rec.state == RecState.waitingForFix,
                           showTiles: widget.showTiles,
                           offlineTiles: widget.maps?.provider,
@@ -375,6 +403,21 @@ class _RecordScreenState extends State<RecordScreen> {
                         ),
                       ),
                     ),
+                    if (widget.services?.gps != null &&
+                        (rec.state == RecState.idle ||
+                            rec.state == RecState.stopped))
+                      Positioned(
+                        left: 12,
+                        top: pts.isEmpty ? 92 : 12,
+                        child: ListenableBuilder(
+                          listenable: widget.services!.gps!,
+                          builder: (context, _) => _GpsPill(
+                            gps: widget.services!.gps!,
+                            onOpenSettings: () =>
+                                widget.location?.openLocationSettings(),
+                          ),
+                        ),
+                      ),
                     if (pts.isEmpty)
                       Positioned(
                         left: 12,
@@ -391,7 +434,8 @@ class _RecordScreenState extends State<RecordScreen> {
                                   'Getting an accurate position… '
                                       '${rec.warmupProgress}/${rec.warmupRequired}\n'
                                       'Stand still under open sky.',
-                                _ => 'Press Record at your starting point.\nNo signal or internet needed.',
+                                _ =>
+                                  'Stand at your start until GPS is green,\nthen press Record. No signal needed.',
                               },
                               textAlign: TextAlign.center,
                               style: Theme.of(context).textTheme.titleSmall,
@@ -404,23 +448,35 @@ class _RecordScreenState extends State<RecordScreen> {
               ),
             ),
             if (rec.state == RecState.recording && !rec.moving)
-              Text('Standing still: trail paused',
-                  style: Theme.of(context).textTheme.labelMedium),
-            _Stats(items: [
-              ('Distance', _km(rec.distanceM)),
-              ('Time', _duration()),
-              ('Points', '${pts.length}'),
-              ('GPS ±', rec.lastAccuracyM == null
-                  ? '–'
-                  : '${rec.lastAccuracyM!.toStringAsFixed(0)} m'),
-              (_slopeLabel(), alt == null ? '–' : '${alt.toStringAsFixed(0)} m'),
-              ('Max gap', _km(maxGap(pts))),
-            ]),
+              Text(
+                'Standing still: trail paused',
+                style: Theme.of(context).textTheme.labelMedium,
+              ),
+            _Stats(
+              items: [
+                ('Distance', _km(rec.distanceM)),
+                ('Time', _duration()),
+                ('Points', '${pts.length}'),
+                (
+                  'GPS ±',
+                  rec.lastAccuracyM == null
+                      ? '–'
+                      : '${rec.lastAccuracyM!.toStringAsFixed(0)} m',
+                ),
+                (
+                  _slopeLabel(),
+                  alt == null ? '–' : '${alt.toStringAsFixed(0)} m',
+                ),
+                ('Max gap', _km(maxGap(pts))),
+              ],
+            ),
             if (rec.error != null)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Text('GPS error: ${rec.error}',
-                    style: TextStyle(color: cs.error)),
+                child: Text(
+                  'GPS error: ${rec.error}',
+                  style: TextStyle(color: cs.error),
+                ),
               ),
             if (rec.state == RecState.stopped &&
                 pts.length >= 2 &&
@@ -441,7 +497,9 @@ class _RecordScreenState extends State<RecordScreen> {
                             backgroundColor: const Color(0xFF1E6FE8),
                             foregroundColor: Colors.white,
                             textStyle: const TextStyle(
-                                fontSize: 17, fontWeight: FontWeight.w600),
+                              fontSize: 17,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
                       ),
@@ -453,9 +511,11 @@ class _RecordScreenState extends State<RecordScreen> {
                         child: OutlinedButton.icon(
                           key: const Key('save_journey'),
                           onPressed: _savedId == null ? _save : null,
-                          icon: Icon(_savedId == null
-                              ? Icons.bookmark_add_outlined
-                              : Icons.check),
+                          icon: Icon(
+                            _savedId == null
+                                ? Icons.bookmark_add_outlined
+                                : Icons.check,
+                          ),
                           label: Text(_savedId == null ? 'Save' : 'Saved'),
                         ),
                       ),
@@ -467,36 +527,43 @@ class _RecordScreenState extends State<RecordScreen> {
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
               child: SizedBox(
                 width: double.infinity,
-                height: rec.state == RecState.stopped &&
+                height:
+                    rec.state == RecState.stopped &&
                         pts.length >= 2 &&
                         widget.services != null
                     ? 48
                     : 64,
                 child: switch (rec.state) {
                   RecState.idle || RecState.stopped => FilledButton.icon(
-                      key: const Key('record'),
-                      onPressed: _start,
-                      icon: const Icon(Icons.fiber_manual_record),
-                      label: Text(rec.state == RecState.stopped
+                    key: const Key('record'),
+                    onPressed: _start,
+                    icon: const Icon(Icons.fiber_manual_record),
+                    label: Text(
+                      rec.state == RecState.stopped
                           ? 'New recording'
-                          : 'Record'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFFFF6B00),
-                        textStyle: const TextStyle(
-                            fontSize: 20, fontWeight: FontWeight.w600),
+                          : 'Record',
+                    ),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF6B00),
+                      textStyle: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
+                  ),
                   _ => FilledButton.icon(
-                      key: const Key('stop'),
-                      onPressed: _confirmStop,
-                      icon: const Icon(Icons.stop),
-                      label: const Text('Stop'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: cs.inverseSurface,
-                        textStyle: const TextStyle(
-                            fontSize: 20, fontWeight: FontWeight.w600),
+                    key: const Key('stop'),
+                    onPressed: _confirmStop,
+                    icon: const Icon(Icons.stop),
+                    label: const Text('Stop'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: cs.inverseSurface,
+                      textStyle: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
+                  ),
                 },
               ),
             ),
@@ -525,9 +592,12 @@ class _Stats extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(vertical: 6),
                 child: Column(
                   children: [
-                    Text(value,
-                        style: t.titleLarge
-                            ?.copyWith(fontWeight: FontWeight.w700)),
+                    Text(
+                      value,
+                      style: t.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                     Text(label, style: t.bodySmall),
                   ],
                 ),
@@ -545,10 +615,12 @@ class _SheetTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-        child: Text(text,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-      );
+    padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+    child: Text(
+      text,
+      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+    ),
+  );
 }
 
 /// Lists downloaded map regions; import a .pmtiles file or delete one.
@@ -565,8 +637,9 @@ class _OfflineMapsSectionState extends State<_OfflineMapsSection> {
   String? _message;
 
   Future<void> _import() async {
-    final picked =
-        await FilePicker.pickFiles(dialogTitle: 'Pick a .pmtiles map');
+    final picked = await FilePicker.pickFiles(
+      dialogTitle: 'Pick a .pmtiles map',
+    );
     if (picked.isEmpty) return;
     final f = picked.first;
     setState(() {
@@ -592,11 +665,13 @@ class _OfflineMapsSectionState extends State<_OfflineMapsSection> {
         content: Text('Frees ${r.sizeLabel}. You can import it again later.'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
-              onPressed: () => Navigator.pop(c, true),
-              child: const Text('Delete')),
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Delete'),
+          ),
         ],
       ),
     );
@@ -616,17 +691,22 @@ class _OfflineMapsSectionState extends State<_OfflineMapsSection> {
             if (regions.isEmpty)
               const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 16),
-                child: Text('No offline map yet. Import a .pmtiles file '
-                    '(e.g. greece.pmtiles) to see the map with no signal.'),
+                child: Text(
+                  'No offline map yet. Import a .pmtiles file '
+                  '(e.g. greece.pmtiles) to see the map with no signal.',
+                ),
               ),
             for (final r in regions)
               ListTile(
-                leading: Icon(widget.maps.active?.path == r.path
-                    ? Icons.map
-                    : Icons.map_outlined),
+                leading: Icon(
+                  widget.maps.active?.path == r.path
+                      ? Icons.map
+                      : Icons.map_outlined,
+                ),
                 title: Text(r.name),
-                subtitle:
-                    Text('${r.sizeLabel} · detail up to zoom ${r.maxZoom}'),
+                subtitle: Text(
+                  '${r.sizeLabel} · detail up to zoom ${r.maxZoom}',
+                ),
                 trailing: IconButton(
                   tooltip: 'Delete map',
                   icon: const Icon(Icons.delete_outline),
@@ -646,7 +726,8 @@ class _OfflineMapsSectionState extends State<_OfflineMapsSection> {
                     ? const SizedBox(
                         width: 16,
                         height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2))
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
                     : const Icon(Icons.download),
                 label: const Text('Import map file'),
               ),
@@ -654,6 +735,64 @@ class _OfflineMapsSectionState extends State<_OfflineMapsSection> {
           ],
         );
       },
+    );
+  }
+}
+
+/// GPS warm-up status: red searching, amber settling, green ready.
+class _GpsPill extends StatelessWidget {
+  const _GpsPill({required this.gps, this.onOpenSettings});
+  final GpsMonitor gps;
+  final VoidCallback? onOpenSettings;
+
+  @override
+  Widget build(BuildContext context) {
+    final acc = gps.accuracyM;
+    final (Color color, String text) = gps.locationOff
+        ? (const Color(0xFF9E9E9E), 'Location is off · tap to turn on')
+        : gps.noPermission
+        ? (const Color(0xFF9E9E9E), 'GPS off · tap Record to allow location')
+        : switch (gps.signal) {
+            GpsSignal.searching => (
+              const Color(0xFFE53935),
+              'Searching for GPS… ${gps.searchingFor.inSeconds} s',
+            ),
+            GpsSignal.settling => (
+              const Color(0xFFFFB300),
+              'GPS settling${acc == null ? '' : ' · ±${acc.toStringAsFixed(0)} m'}',
+            ),
+            GpsSignal.ready => (
+              const Color(0xFF2E9E4F),
+              'GPS ready${acc == null ? '' : ' · ±${acc.toStringAsFixed(0)} m'}',
+            ),
+          };
+    return Material(
+      key: const Key('gps_pill'),
+      color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.92),
+      borderRadius: BorderRadius.circular(20),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: gps.locationOff ? onOpenSettings : null,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 12,
+                height: 12,
+                decoration: BoxDecoration(
+                  color: color,
+                  shape: BoxShape.circle,
+                  boxShadow: [BoxShadow(color: color, blurRadius: 6)],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(text, style: Theme.of(context).textTheme.labelLarge),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

@@ -25,9 +25,17 @@ class Recorder extends ChangeNotifier {
   })  : _now = now ?? DateTime.now,
         _filter = filter ?? PointFilter(),
         _smoother = smoother ?? PositionSmoother(),
-        _warmup = warmup ?? GpsWarmup();
+        // Stricter than before: ~8 s of fixes <= 8 m that agree within
+        // 6 m. Phones report small accuracy while still sliding into place.
+        _warmup = warmup ??
+            GpsWarmup(requiredFixes: 8, maxAccuracyM: 8, maxSpreadM: 6);
 
   final GpsWarmup _warmup;
+
+  /// Fallback rule (5 fixes <= 15 m within 10 m) used after [_maxStrictWait].
+  final GpsWarmup _looseWarmup = GpsWarmup();
+  static const _maxStrictWait = Duration(seconds: 30);
+  DateTime? _firstWarmupFix;
 
   /// Written as the first line of each raw log (e.g. GPS mode used).
   final Map<String, Object?> Function()? sessionMeta;
@@ -70,7 +78,11 @@ class Recorder extends ChangeNotifier {
   Object? _error;
   Object? get error => _error;
 
-  Future<void> start() async {
+  /// [gpsReady]: the warm-up indicator was already green, so the GPS has
+  /// settled; record from the first fix. [prelude]: fixes seen while
+  /// warming up, written to the raw GPS log for diagnosis.
+  Future<void> start(
+      {bool gpsReady = false, List<TrackPoint> prelude = const []}) async {
     _points.clear();
     _lastGood = null;
     _recent.clear();
@@ -78,8 +90,12 @@ class Recorder extends ChangeNotifier {
     _filter.reset();
     _smoother.reset();
     _warmup.reset();
+    _looseWarmup.reset();
+    _firstWarmupFix = null;
+    if (gpsReady) _warmup.markReady();
     _startedAt = _now();
-    await store.startSession(_startedAt!, meta: sessionMeta?.call());
+    await store.startSession(_startedAt!,
+        meta: sessionMeta?.call(), prelude: prelude);
     _state = RecState.waitingForFix;
     _listen();
     notifyListeners();
@@ -140,7 +156,15 @@ class Recorder extends ChangeNotifier {
 
     // 0. wait until the GPS has settled (no lines drawn while it converges)
     if (!_warmup.ready) {
-      if (_warmup.feed(p)) {
+      _firstWarmupFix ??= p.time;
+      final strict = _warmup.feed(p);
+      final loose = _looseWarmup.feed(p);
+      // Never block forever: under trees accuracy can stay at +-10-15 m.
+      // After 30 s of fixes, the looser old rule is good enough.
+      final waitedLong =
+          p.time.difference(_firstWarmupFix!) >= _maxStrictWait;
+      if (strict || (loose && waitedLong)) {
+        _warmup.markReady();
         _filter.reset();
         _smoother.reset();
       } else {

@@ -66,6 +66,47 @@ void main() {
     expect(rec.points.length, 1);
   });
 
+  test('weak signal (+-12 m under trees) still starts after ~30 s', () async {
+    final weak = Recorder(
+      store: TrackStore(dir),
+      positions: () => gps.stream,
+      now: () => DateTime.utc(2026, 1, 1),
+    ); // default (strict) warm-up
+    await weak.start();
+    for (var s = 0; s < 45; s++) {
+      gps.add(p(37.98, acc: 12, sec: s));
+    }
+    await Future<void>.delayed(Duration.zero);
+    await weak.idle();
+    expect(weak.state, RecState.recording);
+    expect(weak.points.length, 1);
+    expect(weak.points.first.time.difference(DateTime.utc(2026, 1, 1)).inSeconds,
+        inInclusiveRange(29, 32));
+    weak.dispose();
+  });
+
+  test('gpsReady start skips the warm-up wait and logs prelude', () async {
+    final strict = Recorder(
+      store: TrackStore(dir),
+      positions: () => gps.stream,
+      now: () => DateTime.utc(2026, 1, 1),
+    );
+    await strict.start(gpsReady: true, prelude: [p(37.97, sec: -5)]);
+    gps.add(p(37.98, sec: 0));
+    await Future<void>.delayed(Duration.zero);
+    await strict.idle();
+    expect(strict.state, RecState.recording);
+    expect(strict.points.length, 1);
+    final raw = dir
+        .listSync()
+        .whereType<File>()
+        .firstWhere((f) => f.path.contains('raw_'))
+        .readAsLinesSync();
+    expect(raw[0], contains('meta'));
+    expect(raw[1], startsWith('{"pre":'));
+    strict.dispose();
+  });
+
   test('starts idle', () {
     expect(rec.state, RecState.idle);
     expect(rec.points, isEmpty);
