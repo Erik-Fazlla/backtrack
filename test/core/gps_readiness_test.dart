@@ -54,12 +54,14 @@ void main() {
     expect(r.status(t0.add(const Duration(seconds: 5))), GpsSignal.settling);
   });
 
-  test('fixes stop for > 5 s -> back to searching', () {
+  test('fixes stop for > 5 s -> back to searching, counts since last fix', () {
     final r = GpsReadiness(startedAt: t0);
     for (var s = 0; s <= 10; s++) {
       r.add(fix(s));
     }
-    expect(r.status(t0.add(const Duration(seconds: 17))), GpsSignal.searching);
+    final at = t0.add(const Duration(seconds: 17));
+    expect(r.status(at), GpsSignal.searching);
+    expect(r.searchingFor(at).inSeconds, 7);
   });
 
   test('one bad fix inside the window drops back to settling', () {

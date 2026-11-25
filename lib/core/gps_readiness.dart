@@ -45,10 +45,8 @@ class GpsReadiness {
 
   double? get lastAccuracyM => _recent.isEmpty ? null : _recent.last.accuracyM;
 
-  DateTime? _firstFixAt;
 
   void add(TrackPoint p) {
-    _firstFixAt ??= p.time;
     _recent.add(p);
     while (_recent.isNotEmpty && p.time.difference(_recent.first.time) > keep) {
       _recent.removeAt(0);
@@ -56,8 +54,11 @@ class GpsReadiness {
   }
 
   /// How long we have been waiting for a first fix (UI hint).
+  /// How long without a fresh fix: since start when none came yet, else
+  /// since the last one (a single cached fix then silence shouldn't read
+  /// "searching 0 s").
   Duration searchingFor(DateTime now) {
-    final d = (_firstFixAt ?? now).difference(startedAt);
+    final d = now.difference(_recent.isEmpty ? startedAt : _recent.last.time);
     return d.isNegative ? Duration.zero : d;
   }
 
